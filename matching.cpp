@@ -1,8 +1,5 @@
-#include<cmath>
-#include<iostream>
-#include<cassert>
-#include<opencv/cv.h>
-#include<vector>
+#include "common.hpp"
+#include "depthMap.hpp"
 extern "C" {
 #include<luaT.h>
 #include<TH/TH.h>
@@ -16,12 +13,6 @@ typedef THFloatTensor Tensor;
 #define Tensor_(a) THFloatTensor_##a
 typedef float Real;
 typedef double accreal;
-typedef unsigned char byte;
-typedef unsigned short uint16;
-
-typedef cv::Mat_<float> matf;
-
-#define TWO_BITS_PER_FILTER
 
 #ifdef __ARM__
 #define __NEON__
@@ -134,6 +125,30 @@ inline void keepGoodInVector(vector<T> & v, vector<T> & v2,
   v2.resize(k);
 }
 
+bool track(const matb & im1, const matb & im2, vector<Point2f> & corners1,
+	   vector<Point2f> & corners2, vector<float> & err,
+	   int npts, float quality, float dist) {
+  vector<byte> status;
+  const int flags = (corners2.size() == 0) ? 0 : OPTFLOW_USE_INITIAL_FLOW;
+  if (corners1.size() == 0)
+    cv::goodFeaturesToTrack(im1, corners1, npts, quality, dist);
+  if (corners1.size() < 4)
+    cv::goodFeaturesToTrack(im1, corners1, npts, 1e-10, 1);
+  cv::calcOpticalFlowPyrLK(im1, im2, corners1, corners2, status, err, 
+			   Size(21,21), 3,
+			   TermCriteria(TermCriteria::COUNT+TermCriteria::EPS,
+					30, 0.01),flags);
+  keepGoodInVector(corners1, corners2, status);
+  keepGoodInVector(err, status);
+  if (corners1.size() < 4) {
+    cv::goodFeaturesToTrack(im1, corners1, npts, 1e-10, 1);
+    cv::calcOpticalFlowPyrLK(im1, im2, corners1, corners2, status, err);
+    keepGoodInVector(corners1, corners2, status);
+    keepGoodInVector(err, status);
+  }
+  return corners1.size() >= 4;
+}
+
 static int Opticalflow(lua_State *L) {
   const char* idreal = ID_TENSOR_STRING;
   const char* idfloat = "torch.FloatTensor";
@@ -168,20 +183,8 @@ static int Opticalflow(lua_State *L) {
   vector<cv::Point2f> corners, corners2;
   vector<float> err;
   vector<byte> status, inliers;
-  cv::goodFeaturesToTrack(input1_cv_8U, corners, 200, 0.01, 7);
-  if (corners.size() < 4)
-    cv::goodFeaturesToTrack(input1_cv_8U, corners, 200, 1e-10, 1);
-  cv::calcOpticalFlowPyrLK(input1_cv_8U, input2_cv_8U, corners,
-			   corners2, status, err);
-  keepGoodInVector(corners, corners2, status);
-  if (corners.size() < 4) {
-    cv::goodFeaturesToTrack(input1_cv_8U, corners, 200, 1e-10, 1);
-    cv::calcOpticalFlowPyrLK(input1_cv_8U, input2_cv_8U, corners,
-			     corners2, status, err);
-    keepGoodInVector(corners, corners2, status);
-    if (corners.size() < 4)
-      return 0;
-  }
+  if (!track(input1_cv_8U, input2_cv_8U, corners, corners2, err, 200, 0.01, 7))
+    return 0;
   
   matf F = cv::findFundamentalMat(corners, corners2, CV_FM_LMEDS,
   				  1., 0.99, inliers);
@@ -247,9 +250,132 @@ static int Opticalflow(lua_State *L) {
   return 0;
 }
 
+DepthMap depthmap(180, 320, 0.5);
+vector<Point2f> trackedPoints, guessFlow;
+static int Opticalflow2(lua_State *L) {
+  const char* idreal = ID_TENSOR_STRING;
+  const char* idfloat = "torch.FloatTensor";
+  THFloatTensor* input1 = (THFloatTensor*)luaT_checkudata(L, 1, idfloat);
+  THFloatTensor* input2 = (THFloatTensor*)luaT_checkudata(L, 2, idfloat);
+  THFloatTensor* outputDebug = (THFloatTensor*)luaT_checkudata(L, 3, idfloat);
+  THFloatTensor* outputDepth = (THFloatTensor*)luaT_checkudata(L, 4, idfloat);
+  THFloatTensor* outputErr   = (THFloatTensor*)luaT_checkudata(L, 5, idfloat);
+  THFloatTensor* K0     = (THFloatTensor*)luaT_checkudata(L, 6, idfloat);
+  
+  assert(input1->nDimension == 2);
+  const int h = input1->size[0];
+  const int w = input1->size[1];
+  const matf K(3, 3, THFloatTensor_data(K0));
+  const matf Kinv = K.inv();
+  float* ip1 = THFloatTensor_data(input1);
+  float* ip2 = THFloatTensor_data(input2);
+  float* odbgp = THFloatTensor_data(outputDebug);
+  float* odepp = THFloatTensor_data(outputDepth);
+  float* oerrp = THFloatTensor_data(outputErr);
+  const matf input1_cv(h, w, ip1);
+  const matf input2_cv(h, w, ip2);
+  cv::Mat input1_cv_8U, input2_cv_8U;
+  input1_cv.convertTo(input1_cv_8U, CV_8U, 255.f);
+  input2_cv.convertTo(input2_cv_8U, CV_8U, 255.f);
+  matf outputR_cv(h, w, odbgp);
+  matf outputG_cv(h, w, odbgp+outputDebug->stride[0]);
+  matf outputB_cv(h, w, odbgp+2*outputDebug->stride[0]);
+  matf output_cv(h, w, odepp);
+  matf outputErr_cv(h, w, oerrp);
+
+  vector<cv::Point2f> corners = trackedPoints, corners2 = guessFlow;
+  vector<float> err;
+  vector<byte> status, inliers;
+
+  int npts = 1000;
+  float quality = 0.0001f;
+  vector<Point2f> newCorners;
+  cv::goodFeaturesToTrack(input1_cv_8U, newCorners,
+			  max(1,(int)(npts-corners.size())), quality, 5);
+  size_t cornersSize = corners.size();
+  for (size_t i = 0; i < newCorners.size(); ++i) {
+    for (size_t j = 0; j < cornersSize; ++j)
+      if (abs(newCorners[i].x - corners[j].x) +
+	  abs(newCorners[i].y - corners[j].y) < 5)
+	goto bad;
+    corners.push_back(newCorners[i]);
+    corners2.push_back(newCorners[i]);
+  bad:;
+  }
+  if (!track(input1_cv_8U, input2_cv_8U, corners, corners2, err, npts,
+	     quality, 5))
+    return 0;
+  
+  matf F = cv::findFundamentalMat(corners, corners2, CV_FM_RANSAC,
+  				  0.3, 0.99, inliers);
+  size_t i, k = 0;
+  keepGoodInVector(corners, corners2, inliers);
+  keepGoodInVector(err, inliers);
+  trackedPoints = corners2;
+  guessFlow.resize(trackedPoints.size());
+  for (size_t i = 0; i < trackedPoints.size(); ++i)
+    guessFlow[i] = 2 * corners2[i] - corners[i];
+
+  matf E = K.t() * F * K;
+  matf extr = getExtrinsicsFromEssential(E, corners[0], corners2[0], Kinv);
+  matf R = K * extr(Range(0, 3), Range(0, 3)) * Kinv;
+
+  matf outputGray(input1_cv.size());
+  cv::warpPerspective(input1_cv, outputGray, R, input1_cv.size());
+  outputGray.copyTo(outputR_cv);
+  outputGray.copyTo(outputG_cv);
+  outputGray.copyTo(outputB_cv);
+  vector<Point2f> cornersWarped(corners.size());
+
+  matf p(3,1);
+  for (i = 0; i < corners.size(); ++i) {
+    p(0) = corners[i].x;
+    p(1) = corners[i].y;
+    p(2) = 1.f;
+    p = R * p;
+    cornersWarped[i] = Point2f(p(0)/p(2), p(1)/p(2));
+  }
+
+  Point2f mean(0,0);
+  for (size_t i = 0; i < corners.size(); ++i)
+    mean = mean + corners2[i] - cornersWarped[i];
+  mean = 1.f / (float)corners.size() * mean;
+  for (size_t i = 0; i < corners.size(); ++i)
+    corners2[i] -= mean;
+
+  for (i = 0; i < cornersWarped.size(); ++i) {
+    cv::line(outputG_cv, cornersWarped[i], corners2[i], 1, 1);
+    const float x = cornersWarped[i].x-w/2, y = cornersWarped[i].y-h/2;
+    const float n = sqrt(x*x + y*y);
+    if (n < 25)
+      continue;
+    const float dx = cornersWarped[i].x - corners2[i].x;
+    const float dy = cornersWarped[i].y - corners2[i].y;
+    const float D =  n / sqrt(dx*dx + dy*dy);
+    const float color = min(25.f/D,1.f);
+    cv::line(outputR_cv, cornersWarped[i], cornersWarped[i], color, 10);
+    cv::line(outputB_cv, cornersWarped[i], cornersWarped[i], 1-color, 10);
+    cv::line(output_cv, cornersWarped[i], cornersWarped[i], D, 10);
+    cv::line(outputErr_cv, cornersWarped[i], cornersWarped[i],
+	     //1.f - max(0.f, min(1.f, err[i])), 10);
+	     1.f, 10);
+  }
+
+  depthmap.UpdateMap(R, mean, output_cv, outputErr_cv);
+  depthmap.getMap().copyTo(output_cv);
+  depthmap.getConf().copyTo(outputErr_cv);
+
+  Point2f target = depthmap.getTarget();
+  cv::line(outputR_cv, target, target, 1, 30);
+  lua_pushnumber(L, target.x);
+  lua_pushnumber(L, target.y);
+  return 2;
+}
+
 
 static const struct luaL_reg libmatching[] = {
   {"opticalflow", Opticalflow},
+  {"opticalflow2", Opticalflow2},
   {"undistort", Undistort},
   {NULL, NULL}
 };

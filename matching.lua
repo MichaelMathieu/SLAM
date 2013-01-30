@@ -8,8 +8,9 @@ function opticalflow(im1, im2, K)
    outputDebug = torch.Tensor(3, im1:size(1), im1:size(2)):zero()
    im1 = im1:contiguous()
    im2 = im2:contiguous()
-   libmatching.opticalflow(im1, im2, outputDebug, output, outputErr, K)
-   return output, outputErr, outputDebug
+   local xtarget, ytarget = libmatching.opticalflow2(im1, im2, outputDebug,
+						     output, outputErr, K)
+   return output, outputErr, outputDebug, xtarget, ytarget
 end
 
 function undistort(im, K, dist)
