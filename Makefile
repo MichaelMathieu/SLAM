@@ -15,8 +15,14 @@ all: match
 match: matching.cpp matching.o depthMap.cpp depthMap.o
 	${CXX} ${FLAGS} depthMap.o matching.o ${LIBS} -shared -o libmatching.so
 
-slam: slam.cpp slam.o
-	${CXX} ${FLAGS} slam.o ${LIBS} -o slamtest
+slam: slam.cpp slam.o kalman.o kalman.cpp
+	${CXX} ${FLAGS} slam.o kalman.o ${LIBS} -o slamtest
+
+kalman: kalman.cpp kalman.o
+	${CXX} ${FLAGS} kalman.o ${LIBS} -o kalmantest
+
+sim: simulation.cpp kalman.cpp simulation.o kalman.o
+	${CXX} ${FLAGS} kalman.o simulation.o ${LIBS} -o simul
 
 clean:
 	rm -rf libmatching.so matching.o depthMap.o
