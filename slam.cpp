@@ -1,7 +1,15 @@
 #include "SLAM.hpp"
 #include <opencv/highgui.h>
+#include<signal.h>
 using namespace std;
 using namespace cv;
+
+inline float sq(float a) {
+  return a*a;
+}
+inline float cvval(matf a) {
+  return a(0);
+}
 
 bool compareKeyPoints(const KeyPoint & p1, const KeyPoint & p2) {
   return p1.response > p2.response;
@@ -28,17 +36,46 @@ void SLAM::match(const matb & im, std::vector<Match> & matches,
   matf result;
   Point2i maxp;
   double maxv;
+  
+  matf area(im.size().height, im.size().width);
+  matf areaDisp(im.size().height, im.size().width, 0.0f);
+  matf P = matf(3,4,0.0f);
+  P(Range(0,3),Range(0,3)) = kalman.getRot().toMat() * deltaR;
+  P(Range(0,3),Range(3,4)) = - P(Range(0,3),Range(0,3)) * kalman.getPos();
+  P = K*P;
+
   for (size_t i = 0; i < features.size(); ++i) {
+    // search area
+    area.setTo(0);
+    matf p = P * kalman.getPt3dH(i);
+    int px = floor(p(0)/p(2)+0.5), py = floor(p(1)/p(2)+0.5);
+    float sigmagauss = 15; // TODO
+    int hx = sigmagauss, hy = sigmagauss;
+    //float kgauss = 1./sqrt(2.*3.14159*sigmagauss);
+    for (int k = max(0,px-hx); k < min(im.size().width,px+hx); ++k)
+      for (int j = max(0,py-hy); j < min(im.size().height,py+hy); ++j) {
+	float d = sq(k-px)+sq(j-py);
+	//area(j,k) = exp(-0.5*d/sigmagauss);
+	if (d < sq(sigmagauss)) {
+	  area(j,k) = 1.;
+	  areaDisp(j,k) = 1.;
+	}
+      }
+
     matchTemplate(im, features[i].descriptor, result, CV_TM_CCORR_NORMED);
+    const int dx = floor(features[i].descriptor.size().width*0.5f);
+    const int dy = floor(features[i].descriptor.size().height*0.5f);
+    matf areaCrop = area(Range(dy,result.size().height+dy),
+			 Range(dx,result.size().width+dx));
+    result = result.mul(areaCrop);
     minMaxLoc(result, NULL, &maxv, NULL, &maxp);
     if (maxv > threshold) {
-      const int dx = floor(features[i].descriptor.size().width*0.5f);
-      const int dy = floor(features[i].descriptor.size().height*0.5f);
       matches.push_back(Match(Point2i(maxp.x+dx, maxp.y+dy), i));
     }
-    //imshow("disp", result);
-    //cvWaitKey(0);
   }
+  namedWindow("test");
+  imshow("test", areaDisp);
+  cvWaitKey(1);
 }
 
 void SLAM::addNewFeatures(const matb & im, const vector<KeyPoint> & keypoints,
@@ -61,49 +98,119 @@ void SLAM::addNewFeatures(const matb & im, const vector<KeyPoint> & keypoints,
 			       im(Range(pt.y-dy, pt.y+dy),
 				  Range(pt.x-dx, pt.x+dx)),
 			       matf::zeros(3,3)));
+
     newpoints.push_back(i);
+    // add the new point to the kalman filter
+    {
+      matf x(3,1);
+      x(0) = pt.x; x(1) = pt.y; x(2) = 1.0f;
+      matf P = kalman.getP();
+      matf px = P.t() * (P * P.t()).inv() * x;
+      cout << "Adding new point px " << px << endl;
+      px = px/px(3);
+      px = px(Range(0,3),Range(0,1));
+      matf cov = 10*matf::eye(3,3);
+      kalman.addNewPoint(px, cov);
+    }
+    //
     --n;
   badAddNewFeature:;
   }
 }
 
+matf rotmat2TaitBryan(const matf & M) {
+  matf out(3,1);
+  //TODO: this only works if -pi/2 < beta < pi/2
+  out(1) = asin(M(2,0));
+  out(0) = atan2(M(2,1), M(2,2));
+  out(2) = atan2(M(1,0), M(0,0));
+  return out;
+}
+
+void SLAM::waitForInit() {
+  do {
+    mongoose.FetchMongoose();
+  } while (!mongoose.isInit);
+  matf R = mongooseAlign.inv() * mongoose.rotmat.inv() * mongooseAlign;
+  R.copyTo(lastR);
+}
+
 void SLAM::newImage(const matb & im) {
+  mongoose.FetchMongoose();
   if (features.size() == 0) {
     newInitImage(im);
   } else {
     vector<KeyPoint> keypoints;
     getSortedKeyPoints(im, 10*minTrackedPerImage, keypoints);
+
+    matf R = mongooseAlign.inv() * mongoose.rotmat.inv() * mongooseAlign;
+    deltaR = lastR.inv() * R;
+    //kalman.setRVel(rotmat2TaitBryan(deltaR));
+    R.copyTo(lastR);
+
+    cout << kalman.getPos() << endl;
     
     vector<Match> matches;
     match(im, matches, 0.99f);
-    //addNewFeatures(im, keypoints, matches,
-    //		   minTrackedPerImage - matches.size(), 15.f);
-    cout << features.size() << " " << matches.size() << endl;
+    addNewFeatures(im, keypoints, matches, minTrackedPerImage-matches.size(), 100.f);
+    //cout << features.size() << " " << matches.size() << endl;
 
-    if (matches.size() == 4) {
-      matf y(8,1);
-      for (int i = 0; i < 4; ++i) {
+    if (matches.size() > 0) {
+      //TODO: the next delta is greater
+#if 0
+      vector<Match> matches0 = matches;
+      matches.clear();
+      for (int i = 0; i < (signed)matches0.size(); ++i)
+	if (matches0[i].iFeature < 4)
+	  matches.push_back(matches0[i]);
+#endif
+
+      matf y(2*matches.size(),1);
+      vector<int> activePts;
+      for (int i = 0; i < (signed)matches.size(); ++i) {
 	y(2*i) = matches[i].pos.x;
 	y(2*i+1) = matches[i].pos.y;
+	activePts.push_back(matches[i].iFeature);
       }
       float delta = 0.1f;
+      kalman.setActivePoints(activePts);
       kalman.update(matf(0,0), y, &delta);
-      cout << kalman.x << endl;
+      kalman.renormalize();
     }
     
-    Mat imdisp;
+    Mat imdisp; 
     cvtColor(im, imdisp, CV_GRAY2RGB);
+
+    //matf Pdebug(3,3,0.0f); Pdebug(2,0) = 1; Pdebug(0,1) = 1; Pdebug(1,2) = -1;
+    //matf P = debugmatf*((debugmatf2*Pdebug).inv()*mongoose.rotmat*Pdebug).inv();
+    /*
+    if (p0debug.size().height == 0)
+      p0debug = kalman.getPos();
+    for (size_t i = 0; i < features.size(); ++i) {
+      matf p = kalman.getPt3d(i).clone();
+      p = K * P * (p - p0debug);
+      p = p / p(2);
+      if ((p(0) >= 5) && (p(0) < imdisp.size().height-5) &&
+	  (p(1) >= 5) && (p(1) < imdisp.size().width-5)) {
+	cout << p << endl;
+	circle(imdisp, Point2f(p(0), p(1)), 4, Scalar(255, 0, 0));
+      }
+    }
+    */
+
     for (size_t i = 0; i < matches.size(); ++i) {
       circle(imdisp, matches[i].pos, 5, Scalar(0, 0, 255));
       matf p = kalman.getPt3d(matches[i].iFeature).clone();
       p = K * kalman.getRot().toMat() * (p - kalman.getPos());
       p = p / p(2);
-      circle(imdisp, Point2f(p(0), p(1)), 4, Scalar(255, 0, 255));
+      circle(imdisp, Point2f(p(0), p(1)), 4, Scalar(0, 255, 0));
     }
     for (size_t i = 0; i < keypoints.size(); ++i)
       circle(imdisp, keypoints[i].pt, 2, Scalar(255, 0, 0));
+
     imshow("disp", imdisp);
     cvWaitKey(1);
+    visualize();
   }
 }
 
@@ -136,18 +243,9 @@ bool SLAM::newInitImage(const matb & im, const Size & pattern) {
     for (int i = 0; i < 3; ++i)
       tvecf(i) = tvec(i);
 
-    for (int i = 0; i < pattern.height; ++i)
-      for (int j = 0; j < pattern.width; ++j) {
-	Mat_<float> p(3,1,0.0f);
-	p(0) = i;
-	p(1) = j;
-	p = K * q.toMat() * (p - tvecf);
-	p = p / p(2);
-	Point2f pt(p(0),p(1));
-	line(imdisp, pt,pt, Scalar(0, 0, 1), 11);
-      }
     kalman.setPos(tvecf);
     kalman.setRot(q);
+    //debugmatf = q.toMat();
 
     int gc[] = {0, pattern.width-1, (pattern.height-1)*pattern.width,
 		pattern.width*pattern.height-1};
@@ -185,7 +283,7 @@ bool SLAM::newInitImage(const matb & im, const Size & pattern) {
 
     for (int i = 0; i < 4; ++i) {
       kalman.setPt3d(i, features[i].pos);
-      kalman.setPt3dCov(i, 1e-5);
+      kalman.setPt3dCov(i, 5e-2);
     }
     // reproject the points
     {
@@ -229,6 +327,10 @@ matb loadImage(const string & path) {
 }
 matb getFrame(VideoCapture & cam) {
   Mat im0;
+  cam.grab();
+  cam.grab();
+  cam.grab();
+  cam.grab();
   cam.read(im0);
   Mat output;
   if (im0.type() == CV_8UC3) {
@@ -244,28 +346,61 @@ matb getFrame(VideoCapture & cam) {
   return output;
 }
 
+SLAM* slamp = NULL;
+void handler(int s) {
+  printf("Ctrl-C (or Ctrl-\\)\n");
+  if (slamp) {
+    delete slamp;
+    slamp = NULL;
+  }
+  exit(0);
+}
+
 int main () {
+  struct sigaction sigIntHandler;
+  sigIntHandler.sa_handler = handler;
+  sigemptyset(&sigIntHandler.sa_mask);
+  sigIntHandler.sa_flags = 0;
+  sigaction(SIGINT, &sigIntHandler, NULL);
+  sigaction(SIGQUIT, &sigIntHandler, NULL);
+
+  matf MR(3,3,0.0f);
+  //MR(2,0) = 1; MR(0,1) = 1; MR(1,2) = -1;
+  MR(0,2) = 1; MR(1,1) = 1; MR(2,0) = 1;
+
   matf K = matf::eye(3,3);
-  K(0,0) = K(1,1) = 275;
-  K(0,2) = 158;
-  K(1,2) = 89;
+  //K(0,0) = K(1,1) = 275;
+  //K(0,2) = 158;
+  //K(1,2) = 89;
+  K(0,0) = K(1,1) = 818;
+  K(0,2) = 333;
+  K(1,2) = 231;
   matf distCoeffs(5,1, 0.0f);
-  distCoeffs(0) = -0.5215f;
-  distCoeffs(1) =  0.4426f;
-  distCoeffs(2) =  0.0012f;
-  distCoeffs(3) =  0.0071f;
-  distCoeffs(4) = -0.0826f;
+  //distCoeffs(0) = -0.5215f;
+  //distCoeffs(1) =  0.4426f;
+  //distCoeffs(2) =  0.0012f;
+  //distCoeffs(3) =  0.0071f;
+  //distCoeffs(4) = -0.0826f;
+  distCoeffs(0) = -0.0142f;
+  distCoeffs(1) =  0.0045f;
+  distCoeffs(2) =  0.0011f;
+  distCoeffs(3) =  0.0056f;
+  distCoeffs(4) = -0.5707f;
   namedWindow("disp");
   int camidx = 0;
   VideoCapture camera(camidx);
+  camera.set(CV_CAP_PROP_FPS, 30);
   if (!camera.isOpened()) {
     cerr << "Could not open camera " << camidx << endl;
     return -1;
   }
 
-  SLAM slam(K, distCoeffs);
+  slamp = new SLAM(K, distCoeffs, MR, 10);
+  slamp->waitForInit();
   while(true)
-    slam.newImage(getFrame(camera));
+    slamp->newImage(getFrame(camera));
+  if (slamp)
+    delete slamp;
 
   //Mat lena = loadImage("lena.png");
   //slam.newImage(lena);

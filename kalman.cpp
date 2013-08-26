@@ -6,6 +6,19 @@
 using namespace std;
 using namespace cv;
 
+void KalmanSLAM::addNewPoint(const matf & pos, matf c) {
+  //TODO: this function is seriously inefficient
+  int n = x.size().height;
+  matf newx(n+3, 1);
+  x.copyTo(newx(Range(0,n), Range(0,1)));
+  pos.copyTo(newx(Range(n,n+3), Range(0,1)));
+  matf newcov(n+3, n+3, 0.0f);
+  cov.copyTo(newcov(Range(0,n), Range(0,n)));
+  c.copyTo(newcov(Range(n,n+3), Range(n,n+3)));
+  x = newx;
+  cov = newcov;
+}
+
 Quaternion KalmanSLAM::TB2Q(const matf & m) {
   const float a = m(0)/2, b = m(1)/2, c = m(2)/2;
   const float ca = cos(a), cb = cos(b), cc = cos(c);
@@ -108,7 +121,6 @@ matf KalmanSLAM::dMronrk(const Quaternion & r, int k) {
   return 2.f*out;
 }
 
-
 matf KalmanSLAM::getA(const void* p) const {
   // tested
   float delta = *((float*)p);
@@ -133,27 +145,28 @@ matf KalmanSLAM::getW(const void* p) const {
 matf KalmanSLAM::getH(const void* p) const {
   float delta = *((float*)p);
   matf out(nObsParams(), nStateParams(), 0.0f);
-  int n = getNPts();
+  int n = activePts.size();
   matf KM = K * getRot().toMat();
   matf KdM[4];
   for (int k = 0; k < 4; ++k)
     KdM[k] = K * dMronrk(getRot(), k);
   matf pos = getPos();
-  for (int i = 0; i < n; ++i) {
+  for (int i0 = 0; i0 < n; ++i0) {
+    int i = activePts[i0];
     // dh/dp
     matf KMXmp = KM * (getPt3d(i) - pos);
     float denominator = KMXmp(2)*KMXmp(2);
-    out(Range(2*i,2*i+2),Range(0,3)) =
+    out(Range(2*i0,2*i0+2),Range(0,3)) =
       (-KMXmp(2)*KM.rowRange(0,2) + KMXmp.rowRange(0,2)*KM.row(2))/denominator;
     // dh/dr
     for (int k = 0; k < 4; ++k) {
       matf KdMXmp = KdM[k] * (getPt3d(i) - pos);
-      out(Range(2*i,2*i+2),Range(3+k,3+k+1)) =
+      out(Range(2*i0,2*i0+2),Range(3+k,3+k+1)) =
 	(KMXmp(2)*KdMXmp.rowRange(0,2) - KdMXmp(2)*KMXmp.rowRange(0,2))/denominator;
     }
     // dh/dX
-    out(Range(2*i,2*i+2),Range(13+3*i,13+3*i+3)) =
-      -out(Range(2*i,2*i+2),Range(0,3));
+    out(Range(2*i0,2*i0+2),Range(13+3*i0,13+3*i0+3)) =
+      -out(Range(2*i0,2*i0+2),Range(0,3));
   }
   return out;
 }
@@ -183,12 +196,12 @@ matf KalmanSLAM::f(const matf &, const matf & w, const void* p) const {
 
 matf KalmanSLAM::h(const matf & v, const void* p) const {
   matf pts3d = getPts3d();
-  int nPts = pts3d.size().height;
+  int nPts = activePts.size();
   matf out = matf(nPts, 2);
   matf tmp;
   matf R = getRot().toMat();
   for (int i = 0; i < nPts; ++i) {
-    tmp = K * R * (pts3d.row(i).t() - getPos());
+    tmp = K * R * (pts3d.row(activePts[i]).t() - getPos());
     out(i,0) = tmp(0)/tmp(2);
     out(i,1) = tmp(1)/tmp(2);
   }

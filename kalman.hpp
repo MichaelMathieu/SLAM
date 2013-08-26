@@ -10,6 +10,7 @@ class KalmanSLAM : public KalmanFilter<float> {
   friend std::ostream & operator<<(std::ostream &, const KalmanSLAM &);
 private:
   matf K; // camera parameters
+  std::vector<int> activePts;
 public:
   //SLAM-specific functions
   inline const matr getK () const {return K;};
@@ -24,12 +25,22 @@ public:
   inline const matr getVel () const {return cvrange(x,7,10);};
   inline void setVel(const matf & pos) {pos.copyTo(cvrange(x,7,10));};
   inline const matr getRvel() const {return cvrange(x,10,13);};
+  inline void setRVel(const matf & rvel) {x.rowRange(10,13) += rvel;};
   inline const matr getPt3d(int i) const {
     return cvrange(x, 13+3*i, 16+3*i);
+  }
+  inline const matr getPt3dH(int i) const {
+    matr out(4,1);
+    out(3) = 1.0f;
+    getPt3d(i).copyTo(out.rowRange(0,3));
+    return out;
   }
   inline const matr getPts3d() const {
     int nrows = (nStateParams() - 13)/3;
     return cvrange(x, 13, nStateParams()).reshape(0, nrows);
+  }
+  inline const matr getPt3dCov(int i) const {
+    return cov(cv::Range(13+3*i, 16+3*i), cv::Range(13+3*i,16+3*i));
   }
   inline void setPt3d(int i, const matr & pos) {
     pos.copyTo(cvrange(x, 13+3*i, 16+3*i));
@@ -51,19 +62,33 @@ public:
     cov(idx, idx) = c;
   }
   inline int getNPts() const {
-    return nObsParams()/2;
+    return (x.size().height-13)/3;
+  }
+  void addNewPoint(const matf & pos, matf cov);
+  inline void setActivePoints(const std::vector<int> & idx) {
+    activePts = idx;
+  }
+  inline void renormalize() {
+    x.rowRange(3,7) /= norm(x.rowRange(3,7));
+  }
+  matf getP() const { // camera matrix
+    matf out(3,4,0.0f);
+    getRot().toMat().copyTo(out(cv::Range(0,3),cv::Range(0,3)));
+    out(cv::Range(0,3),cv::Range(3,4)) =
+      -out(cv::Range(0,3),cv::Range(0,3)) * getPos();
+    return K*out;
   }
 public:
   // constructor and Kalman class parameters
-  inline KalmanSLAM(const matf & K, int nPts)
-    :KalmanFilter<float>(13 + 3*nPts, 0.1f, 2.f), K(K) {
+  inline KalmanSLAM(const matf & K, int nPts, float covw, float covv)
+    :KalmanFilter<float>(13 + 3*nPts, covw, covv), K(K), activePts() {
     Quaternion q((matf)(matf::eye(3,3)));
     setRot(q);
   };
   virtual ~KalmanSLAM() {};
   virtual int nCommandParams() const { return 0; };
   virtual int nNoise1Params() const { return 6; };
-  virtual int nObsParams() const { return 2*((nStateParams() - 13)/3); };
+  virtual int nObsParams() const { return 2*activePts.size(); };
   virtual int nNoise2Params() const {return nObsParams(); };
 
   // math (derivatives and quaternions)

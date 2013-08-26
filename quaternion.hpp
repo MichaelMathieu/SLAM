@@ -16,8 +16,7 @@ struct Quaternion {
     :a(a), b(b), c(c), d(d) {};
   template<typename T>
   inline Quaternion(const cv::Mat_<T> & rotmat)
-    :a(0.f) {
-    d = 0.5f * sqrt(1.f - rotmat(0,0) - rotmat(1,1) + rotmat(2,2));
+    :a(0.f), d(0.5f * sqrt(1.f - rotmat(0,0) - rotmat(1,1) + rotmat(2,2))) {
     if (abs(d) < 1e-2)
       a = 0.5f * sqrt(1.f + rotmat(0,0) + rotmat(1,1) + rotmat(2,2));
     if (abs(a) < abs(d)) {
@@ -92,6 +91,16 @@ struct Quaternion {
   inline Quaternion operator-() const {
     return Quaternion(-a, -b, -c, -d);
   }
+  inline Quaternion operator*(realq s) const {
+    return Quaternion(s*a, s*b, s*c, s*d);
+  }
+  inline Quaternion & operator*=(realq s) {
+    a *= s;
+    b *= s;
+    c *= s;
+    d *= s;
+    return *this;
+  }
   inline Quaternion operator*(const Quaternion & q) const {
     return Quaternion(a*q.a - b*q.b - c*q.c - d*q.d,
 		      a*q.b + b*q.a + c*q.d - d*q.c,
@@ -101,8 +110,11 @@ struct Quaternion {
   inline Quaternion & operator*=(const Quaternion & q) {
     return operator=(operator*(q));
   }
-  inline realq norm() const {
+  inline realq norm2() const {
     return a*a+b*b+c*c+d*d;
+  }
+  inline realq norm() const {
+    return sqrt(a*a+b*b+c*c+d*d);
   }
   inline Quaternion conjugate() const {
     return Quaternion(a, -b, -c, -d);
@@ -128,17 +140,6 @@ struct Quaternion {
   }
   inline matf toMat() const {
     matf out(3,3);
-    /*
-    out(0,0) = 1.f - 2.f*b*b - 2.f*c*c;
-    out(0,1) = 2.f * (a*b - c*d);
-    out(0,2) = 2.f * (a*c + b*d);
-    out(1,0) = 2.f * (a*b + c*d);
-    out(1,1) = 1.f - 2.f*a*a - 2.f*c*c;
-    out(1,2) = 2.f * (b*c - a*d);
-    out(2,0) = 2.f * (a*c - b*d);
-    out(2,1) = 2.f * (a*d + b*c);
-    out(2,2) = 1.f - 2.f*a*a - 2.f*b*b;
-    */
     out(0,0) = a*a + b*b - c*c - d*d;
     out(0,1) = 2.f * (b*c - a*d);
     out(0,2) = 2.f * (b*d + a*c);

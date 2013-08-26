@@ -3,12 +3,17 @@
 
 #include "common.hpp"
 #include "kalman.hpp"
+#include "mongoose.h"
 #include <opencv2/nonfree/nonfree.hpp>
 
 class SLAM {
 private:
+  //public:
+  const matf mongooseAlign;
   matf camera;
   KalmanSLAM kalman;
+  Mongoose mongoose;
+  matf lastR, deltaR;
   struct Feature {
     matf pos, sigma;
     cv::Mat descriptor;
@@ -35,16 +40,21 @@ private:
   void match(const matb & im, std::vector<Match> & matches,
 	     float threshold = 3.f) const;
 public:
-  inline SLAM(const matf & K, const matf distCoeffs, int minTrackedPerImage = 10)
-    :fastThreshold(10.f), K(K), distCoeffs(distCoeffs),
+  inline SLAM(const matf & K, const matf & distCoeffs, const matf & mongooseAlign,
+	      int minTrackedPerImage = 10)
+    :mongooseAlign(mongooseAlign),
+     fastThreshold(10.f), K(K), distCoeffs(distCoeffs),
      minTrackedPerImage(minTrackedPerImage),
-     kalman(K, 4) {};
+     kalman(K, 4, 0.1, .1),
+     mongoose("/dev/ttyUSB0"), lastR(3,3,0.0f), deltaR(matf::eye(3,3)) {};
   inline matf project3DPoint(const matf & pt3d) const;
   void getSortedKeyPoints(const matb & im, size_t nMinPts,
 			 std::vector<cv::KeyPoint> & out) const;
   void newImage(const matb & im);
   bool newInitImage(const matb & im,
 		    const cv::Size & pattern = cv::Size(10, 12));
+  void waitForInit();
+  void visualize() const;
 };
 
 matf SLAM::project3DPoint(const matf & pt3d) const {
