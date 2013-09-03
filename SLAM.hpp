@@ -8,6 +8,7 @@
 
 class SLAM {
 private:
+  typedef byte imtype;
   //public:
   const matf mongooseAlign;
   matf camera;
@@ -15,11 +16,14 @@ private:
   Mongoose mongoose;
   matf lastR, deltaR;
   struct Feature {
-    matf pos, sigma;
-    cv::Mat descriptor;
-    inline Feature(const matf & pos, const cv::Mat & descriptor,
-		   const matf & sigma)
-      :pos(pos), descriptor(descriptor), sigma(sigma) {};
+    int iKalman;
+    cv::Mat_<imtype> descriptor;
+    matf M;
+    int dx, dy;
+    // dx, dy are half sizes in x and y (in pixels)
+    Feature(const KalmanSLAM & kalman, int iKalman, const cv::Mat_<imtype> & im,
+	    const cv::Point2i & pos2d, const matf & pos3d, int dx, int dy);
+    cv::Mat_<imtype> project(const matf & P) const;
   };
   struct Match {
     int iFeature;
@@ -37,6 +41,8 @@ private:
 		      const std::vector<cv::KeyPoint> & keypoints,
 		      const std::vector<Match> & matches,
 		      int n, float minDist, int dx = 7, int dy = 7);
+  matf matchInArea(const cv::Mat_<imtype> & im, const cv::Mat_<imtype> & patch,
+		   const cv::Mat_<bool> & patchmask, const cv::Rect & area) const;
   void match(const matb & im, std::vector<Match> & matches,
 	     float threshold = 3.f) const;
 public:
@@ -45,13 +51,13 @@ public:
     :mongooseAlign(mongooseAlign),
      fastThreshold(10.f), K(K), distCoeffs(distCoeffs),
      minTrackedPerImage(minTrackedPerImage),
-     kalman(K, 4, 0.1, .1),
-     mongoose("/dev/ttyUSB0"), lastR(3,3,0.0f), deltaR(matf::eye(3,3)) {};
+     kalman(K, 12, 0.1, .1),
+     mongoose("/dev/ttyUSB1"), lastR(3,3,0.0f), deltaR(matf::eye(3,3)) {};
   inline matf project3DPoint(const matf & pt3d) const;
   void getSortedKeyPoints(const matb & im, size_t nMinPts,
 			 std::vector<cv::KeyPoint> & out) const;
-  void newImage(const matb & im);
-  bool newInitImage(const matb & im,
+  void newImage(const mat3b & im);
+  bool newInitImage(const mat3b & im,
 		    const cv::Size & pattern = cv::Size(10, 12));
   void waitForInit();
   void visualize() const;
@@ -62,7 +68,6 @@ matf SLAM::project3DPoint(const matf & pt3d) const {
   out(0) = pt3d(0); out(1) = pt3d(1); out(2) = pt3d(2); out(3) = 1.0f;
   out = camera * out;
   return out / out(2);
-}
-  
+}  
 
 #endif
