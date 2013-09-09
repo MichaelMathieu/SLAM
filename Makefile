@@ -11,8 +11,8 @@ endif
 	${CXX} -D${ARCH} ${FLAGS} -c $< -o $@
 
 
-slam: slam.cpp slam.o kalman.o kalman.cpp mongoose.o mongoose.cpp visualize.o visualize.cpp matching.o matching.cpp
-	${CXX} ${FLAGS} slam.o kalman.o mongoose.o visualize.o matching.o ${LIBS} -o slamtest
+slam: slam.cpp slam.o kalman.o kalman.cpp mongoose.o mongoose.cpp visualize.o visualize.cpp matching.o matching.cpp new_point.o new_point.cpp
+	${CXX} ${FLAGS} slam.o kalman.o mongoose.o visualize.o matching.o new_point.o ${LIBS} -o slamtest
 
 kalman: kalman.cpp kalman.o
 	${CXX} ${FLAGS} kalman.o ${LIBS} -o kalmantest

@@ -26,43 +26,6 @@ void SLAM::getSortedKeyPoints(const matb & im, size_t nMinPts,
     fastThreshold = out[nMinPts*1.9].response;
 }
 
-void SLAM::addNewFeatures(const matb & im, const vector<KeyPoint> & keypoints,
-			  const vector<Match> & matches,
-			  int n, float minDist, int dx, int dy) {
-  //TODO that could have linear complexity (with a bit more memory)
-  vector<int> newpoints;
-  for (size_t i = 0; (i < keypoints.size()) && (n > 0); ++i) {
-    const Point2f & pt = keypoints[i].pt;
-    for (size_t j = 0; j < matches.size(); ++j)
-      if (norm(matches[j].pos - pt) < minDist)
-	goto badAddNewFeature;
-    for (size_t j = 0; j < newpoints.size(); ++j)
-      if (norm(keypoints[newpoints[j]].pt - pt) < minDist)
-	goto badAddNewFeature;
-    if ((pt.y-dy < 0) || (pt.x-dx < 0) || (pt.y+dy >= im.size().height) ||
-	(pt.x+dx >= im.size().width))
-      goto badAddNewFeature;
-    {
-      // add the new point to the kalman filter
-      matf x(3,1);
-      x(0) = pt.x; x(1) = pt.y; x(2) = 1.0f;
-      matf P = kalman.getP();
-      matf px = P.t() * (P * P.t()).inv() * x;
-      cout << "Adding new point px " << px << endl;
-      px = px/px(3);
-      px = px(Range(0,3),Range(0,1));
-      //px = kalman.getPos() + (px - kalman.getPos()) * 100;
-      matf cov = 10*matf::eye(3,3);
-      kalman.addNewPoint(px, cov);
-      // add the new point to the feature vector
-      features.push_back(Feature(kalman, kalman.getNPts()-1, im, pt, px, dx, dy)); 
-      newpoints.push_back(i);
-      --n;
-    }
-  badAddNewFeature:;
-  }
-}
-
 matf rotmat2TaitBryan(const matf & M) {
   matf out(3,1);
   //TODO: this only works if -pi/2 < beta < pi/2
@@ -76,9 +39,6 @@ void SLAM::waitForInit() {
   do {
     mongoose.FetchMongoose();
   } while (!mongoose.isInit);
-  //matf R = mongooseAlign.inv() * mongoose.rotmat.inv() * mongooseAlign;
-  matf R = mongooseAlign.t() * mongoose.rotmat.t() * mongooseAlign;
-  R.copyTo(lastR);
 }
 
 void SLAM::newImage(const mat3b & imRGB) {
@@ -103,9 +63,9 @@ void SLAM::newImage(const mat3b & imRGB) {
     cout << kalman.getPos() << endl;
     
     vector<Match> matches;
-    match(im, matches, 0.5f);
+    match(im, matches, 0.98f);
     addNewFeatures(im, keypoints, matches, minTrackedPerImage-matches.size(),
-		   100.f, 25, 25);
+		   100.f, 50, 50);
     //cout << features.size() << " " << matches.size() << endl;
 
     if (matches.size() > 0) {
@@ -118,17 +78,30 @@ void SLAM::newImage(const mat3b & imRGB) {
 	  matches.push_back(matches0[i]);
 #endif
 
-      matf y(2*matches.size(),1);
       vector<int> activePts;
-      for (int i = 0; i < (signed)matches.size(); ++i) {
+      for (size_t i = 0; i < matches.size(); ++i)
+	if (features[matches[i].iFeature].type == Feature::Point) {
+	  activePts.push_back(matches[i].iFeature);
+	} else {
+	  /*
+	  namedWindow("debug");
+	  matf debug(imdisp.size(), 0.0f);
+	  projectGaussian(kalman.getPt3dCov(features[matches[i].iFeature].iKalman),
+			  debug);
+	  imshow("debug", debug);
+	  */
+	}
+      matf y(2*activePts.size(),1);
+      for (size_t i = 0; i < activePts.size(); ++i) {
 	y(2*i) = matches[i].pos.x;
 	y(2*i+1) = matches[i].pos.y;
-	activePts.push_back(matches[i].iFeature);
       }
       float delta = 0.1f;
-      kalman.setActivePoints(activePts);
-      kalman.update(matf(0,0), y, &delta);
-      kalman.renormalize();
+      if (activePts.size() > 0) { // TODO same (delta)
+	kalman.setActivePoints(activePts);
+	kalman.update(matf(0,0), y, &delta);
+	kalman.renormalize();
+      }
     }
    
 
@@ -166,6 +139,8 @@ void SLAM::newImage(const mat3b & imRGB) {
 }
 
 bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
+  matf R = mongooseAlign.t() * mongoose.rotmat.t() * mongooseAlign;
+  R.copyTo(lastR);
   matb imGray;
   cvtColor(imRGB, imGray, CV_BGR2GRAY);
   matf imGrayf;
@@ -176,7 +151,7 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
   //matf tmp[3];
   float colors[3][5] = {{ 70,  40,  29, 3, -150},
 			{ 19,  21, 114, 3, -255},
-			{ 52,  68,  37, 3, -196}};
+			{ 52,  68,  37, 3, -180}};
   Mat imdisp = imRGB.clone();
   //cvtColor(im, imdisp, CV_GRAY2RGB);
   bool found = true;
@@ -371,18 +346,17 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
 		       {2, pattern.width*pattern.height-1}};
 		       
       matf cornersPos[] = {//matf3(3, 3, 0),
-			   matf3(3, 3+2*(pattern.width-1), 0),
 			   matf3(3+2*(pattern.height-1), 3, 0),
+			   matf3(3, 3+2*(pattern.width-1), 0),
 			   matf3(3+2*(pattern.height-1), 3+2*(pattern.width-1), 0),
 			   //matf3(0, 3, 3),
-			   matf3(0, 3, 3+2*(pattern.width-1)),
 			   matf3(0, 3+2*(pattern.height-1), 3),
+			   matf3(0, 3, 3+2*(pattern.width-1)),
 			   matf3(0, 3+2*(pattern.height-1), 3+2*(pattern.width-1)),
 			   //matf3(3, 0, 3),
 			   matf3(3, 0, 3+2*(pattern.width-1)),
 			   matf3(3+2*(pattern.height-1), 0, 3),
 			   matf3(3+2*(pattern.height-1), 0, 3+2*(pattern.width-1))};
-      // goodCorners contains the 4 extreme chessboard corners
       vector<KeyPoint> goodCorners;
       for (int i = 0; i < nGC; ++i)
 	goodCorners.push_back(KeyPoint(corners[gc[i][0]][gc[i][1]], 7));
@@ -391,12 +365,12 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
       for (int i = 0; i < nGC; ++i) {
 	xmin = min(xmin, (int)goodCorners[i].pt.x);
 	ymin = min(ymin, (int)goodCorners[i].pt.y);
-	xmax = max(xmin, (int)goodCorners[i].pt.x);
-	ymax = max(ymin, (int)goodCorners[i].pt.y);
+	xmax = max(xmax, (int)goodCorners[i].pt.x);
+	ymax = max(ymax, (int)goodCorners[i].pt.y);
       }
       // the size of a feature is set so that it sees the chessboard corner
-      const int d = max(xmax-xmin, ymax-ymin) / min(pattern.height,
-						    pattern.width);
+      const int d = 1. * max(xmax-xmin, ymax-ymin) / min(pattern.height,
+							 pattern.width);
       // check if the corners are not too close to the edge
       for (int i = 0; i < nGC; ++i) {
 	const Point2f & pt = goodCorners[i].pt;
@@ -408,7 +382,8 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
       assert(features.size() == 0);
       for (int i = 0; i < nGC; ++i) {
 	const Point2f & pt = goodCorners[i].pt;
-	features.push_back(Feature(kalman, i, imGray, pt, cornersPos[i], d, d));
+	features.push_back(Feature(kalman, i, imGray, pt, cornersPos[i],
+				   d, d, Feature::Point));
 	kalman.setPt3d(i, cornersPos[i]);
 	kalman.setPt3dCov(i, 5e-2);
 	line(imdisp, goodCorners[i].pt, goodCorners[i].pt, Scalar(0, 0, 0), 2*d+1);
