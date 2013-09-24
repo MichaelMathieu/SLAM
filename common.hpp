@@ -6,6 +6,7 @@
 #include<iostream>
 #include<cassert>
 #include<opencv/cv.h>
+#include<opencv/highgui.h>
 #include<vector>
 
 typedef unsigned char byte;
@@ -71,5 +72,21 @@ inline void cvCopyToCrop(const cv::Mat & src, const cv::Mat & dst,
 		  cv::Range(dstArea.x+dleft, dstArea.x+dstArea.width -dright)));
 }
 
+inline void imshowscale(const std::string & str, const cv::Mat & im) {
+  double m, M;
+  cv::minMaxLoc(im, &m, &M);
+  std::cout << "min="<<m<< " max=" << M  << std::endl;
+  if (M-m < 1e-10) {
+    imshow(str, im);
+  } else {
+    if (im.type() == CV_8UC3) {
+      cv::Mat im2 = (im - m)*(255./(M-m));
+      imshow(str, im2);
+    } else {
+      cv::Mat im2 = (im - m)/(M-m);
+      cv::imshow(str, im2);
+    }
+  }
+}
 
 #endif

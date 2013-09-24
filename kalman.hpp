@@ -15,6 +15,9 @@ public:
   //SLAM-specific functions
   inline const matr getK () const {return K;};
   inline const matr getPos () const {return cvrange(x,0,3);};
+  inline const matr getPosCov() const {
+    return cov(cv::Range(0,3),cv::Range(0,3));
+  }
   inline void setPos(const matf & pos) {pos.copyTo(cvrange(x, 0, 3));};
   inline Quaternion getRot () const {
     return Quaternion(x(3), x(4), x(5), x(6));
@@ -53,6 +56,15 @@ public:
       }
       cov(13+3*i+k, 13+3*i+k) = c;
     }
+  }
+  inline void setPt3dCov(int i, matr c) {
+    for (int k = 0; k < 3; ++k) {
+      for (int j = 0; j < nStateParams(); ++j) {
+	cov(13+3*i+k,j) = 0.f;
+	cov(j,13+3*i+k) = 0.f;
+      }
+    }
+    c.copyTo(cov(cv::Range(13+3*i, 16+3*i), cv::Range(13+3*i,16+3*i)));
   }
   inline void setXCov(int idx, float c) {
     for (int j = 0; j < nStateParams(); ++j) {

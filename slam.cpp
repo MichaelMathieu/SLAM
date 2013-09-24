@@ -1,30 +1,10 @@
 #include "SLAM.hpp"
 #include <opencv/highgui.h>
-#include<signal.h>
+#include <signal.h>
 using namespace std;
 using namespace cv;
 
 Mat imdisp_debug(0,0, CV_32F);
-
-bool compareKeyPoints(const KeyPoint & p1, const KeyPoint & p2) {
-  return p1.response > p2.response;
-}
-
-void SLAM::getSortedKeyPoints(const matb & im, size_t nMinPts,
-			     vector<KeyPoint> & out) const {
-  out.clear();
-  while (out.size() < nMinPts) {
-    out.clear();
-    //SURF surf(fastThreshold);
-    //surf(im, noArray(), out);
-    FAST(im, out, fastThreshold, true);
-    fastThreshold *= 0.5f;
-  }
-  fastThreshold *= 2.f;
-  sort(out.begin(), out.end(), compareKeyPoints);
-  if (out.size() > 2*nMinPts)
-    fastThreshold = out[nMinPts*1.9].response;
-}
 
 matf rotmat2TaitBryan(const matf & M) {
   matf out(3,1);
@@ -50,87 +30,111 @@ void SLAM::newImage(const mat3b & imRGB) {
     cvtColor(imRGB, im, CV_BGR2GRAY);
     Mat & imdisp = imdisp_debug;
     cvtColor(im, imdisp, CV_GRAY2BGR);
-    
-    vector<KeyPoint> keypoints;
-    getSortedKeyPoints(im, 10*minTrackedPerImage, keypoints);
 
-    //matf R = mongooseAlign.inv() * mongoose.rotmat.inv() * mongooseAlign;
     matf R = mongooseAlign.t() * mongoose.rotmat.t() * mongooseAlign;
     deltaR = R * lastR.t();
     kalman.setRVel(rotmat2TaitBryan(deltaR));
     R.copyTo(lastR);
-
-    cout << kalman.getPos() << endl;
     
-    vector<Match> matches;
-    match(im, matches, 0.98f);
-    addNewFeatures(im, keypoints, matches, minTrackedPerImage-matches.size(),
-		   100.f, 50, 50);
-    //cout << features.size() << " " << matches.size() << endl;
-
-    if (matches.size() > 0) {
+    // match points
+    vector<Match> pointMatches;
+    matchPoints(im, pointMatches, 0.98f);
+    if (pointMatches.size() > 0) {
       //TODO: the next delta is greater
-#if 0
-      vector<Match> matches0 = matches;
-      matches.clear();
-      for (int i = 0; i < (signed)matches0.size(); ++i)
-	if (matches0[i].iFeature < 4)
-	  matches.push_back(matches0[i]);
-#endif
-
       vector<int> activePts;
-      for (size_t i = 0; i < matches.size(); ++i)
-	if (features[matches[i].iFeature].type == Feature::Point) {
-	  activePts.push_back(matches[i].iFeature);
-	} else {
-	  /*
-	  namedWindow("debug");
-	  matf debug(imdisp.size(), 0.0f);
-	  projectGaussian(kalman.getPt3dCov(features[matches[i].iFeature].iKalman),
-			  debug);
-	  imshow("debug", debug);
-	  */
-	}
+      for (size_t i = 0; i < pointMatches.size(); ++i) {
+	const size_t iFeature = pointMatches[i].iFeature;
+	const size_t iKalman = features[iFeature].iKalman;
+	activePts.push_back(iKalman);
+      }
       matf y(2*activePts.size(),1);
       for (size_t i = 0; i < activePts.size(); ++i) {
-	y(2*i) = matches[i].pos.x;
-	y(2*i+1) = matches[i].pos.y;
+	y(2*i) = pointMatches[i].pos.x;
+	y(2*i+1) = pointMatches[i].pos.y;
       }
-      float delta = 0.1f;
+      float delta = 0.3f;
       if (activePts.size() > 0) { // TODO same (delta)
 	kalman.setActivePoints(activePts);
 	kalman.update(matf(0,0), y, &delta);
 	kalman.renormalize();
       }
     }
-   
 
-    //matf Pdebug(3,3,0.0f); Pdebug(2,0) = 1; Pdebug(0,1) = 1; Pdebug(1,2) = -1;
-    //matf P = debugmatf*((debugmatf2*Pdebug).inv()*mongoose.rotmat*Pdebug).inv();
+    // match lines
+    vector<Match> lineMatches;
+    matchLines(im, lineMatches, 0.9f);
+    for (size_t i = 0; i < lineMatches.size(); ++i) {
+      Point2f pt = lineMatches[i].pos;
+      matf pt2d(2,1); pt2d(0) = pt.x; pt2d(1) = pt.y;
+      lineFeatures[lineMatches[i].iFeature].newView(pt2d);
+      lineFeatures[lineMatches[i].iFeature].cone.display(imdisp, kalman.getP());
+    }
+
+    // add new features
+    computeNewLines(im, pointMatches,
+		    //minTrackedPerImage-pointMatches.size()-lineMatches.size(),
+		    1-lineFeatures.size(),
+		    100.f, 50, 50);
     /*
-    if (p0debug.size().height == 0)
-      p0debug = kalman.getPos();
-    for (size_t i = 0; i < features.size(); ++i) {
-      matf p = kalman.getPt3d(i).clone();
-      p = K * P * (p - p0debug);
-      p = p / p(2);
-      if ((p(0) >= 5) && (p(0) < imdisp.size().height-5) &&
-	  (p(1) >= 5) && (p(1) < imdisp.size().width-5)) {
-	cout << p << endl;
-	circle(imdisp, Point2f(p(0), p(1)), 4, Scalar(255, 0, 0));
+    if (lineFeatures.size() == 0) {
+      matf p0(4,1,0.0f); p0(3) = 1.0f;
+      matf proj0m = kalman.getP() * p0;
+      Point2f proj0(proj0m(0)/proj0m(2), proj0m(1)/proj0m(2));
+      addNewLine(im, proj0, 50, 50);
+    }
+    */    
+    
+    // debug display
+    {
+      /*
+      matf P = kalman.getP();
+      //for (size_t i = 0; i < lineFeatures.size(); ++i) {
+      for (size_t i = 0; i < 1; ++i) {
+	matf debug(imdisp.size(), 0.0f);
+	//projectGaussian(kalman.getPt3d(iKalman), kalman.getPt3dCov(iKalman),
+	//debug);
+	matf p1 = lineFeatures[i].projPCenter(P);
+	matf p2 = lineFeatures[i].projPInf(P);
+	line(imdisp, Point2i(round(p1(0)),round(p1(1))),
+	     Point2i(round(p2(0)),round(p2(1))),
+	     Scalar(255,0,0));
+      }
+      */
+      matf P = kalman.getP();
+      for (size_t i = 0; i < lineMatches.size(); ++i) {
+	Point2i pt = lineMatches[i].pos;
+	const LineFeature & feature = lineFeatures[lineMatches[i].iFeature];
+	for (size_t j = 0; j < feature.nPot(); ++j) {
+	  matf p = P * feature.posPot[j];
+	  Point2i pt2(p(0)/p(2),p(1)/p(2));
+	  line(imdisp, pt2, pt2, Scalar(0,0,255/5*j), 1);
+	}
+	line(imdisp, pt, pt, Scalar(0,255,0), 1);
       }
     }
-    */
 
-    for (size_t i = 0; i < matches.size(); ++i) {
-      circle(imdisp, matches[i].pos, 5, Scalar(0, 0, 255));
-      matf p = kalman.getPt3d(matches[i].iFeature).clone();
+    // convert good lines to points
+    {
+      matf p3dline, covline;
+      for (int i = lineMatches.size()-1; i >= 0; --i) {
+	int iFeature = lineMatches[i].iFeature;
+	if (lineFeatures[iFeature].isLocalized()) {
+	  lineToFeature(im, lineMatches[i].pos, iFeature);
+	}
+      }
+    }
+
+    // debug display (2)
+   
+    for (size_t i = 0; i < pointMatches.size(); ++i) {
+      circle(imdisp, pointMatches[i].pos, 5, Scalar(0, 0, 255));
+      matf p = kalman.getPt3d(pointMatches[i].iFeature).clone();
       p = K * kalman.getRot().toMat() * (p - kalman.getPos());
       p = p / p(2);
       circle(imdisp, Point2f(p(0), p(1)), 4, Scalar(0, 255, 0));
     }
-    for (size_t i = 0; i < keypoints.size(); ++i)
-      circle(imdisp, keypoints[i].pt, 2, Scalar(255, 0, 0));
+    //for (size_t i = 0; i < keypoints.size(); ++i)
+    //circle(imdisp, keypoints[i].pt, 2, Scalar(255, 0, 0));
 
     imshow("disp", imdisp);
     cvWaitKey(1);
@@ -147,22 +151,14 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
   imGray.convertTo(imGrayf, CV_32F, 1./255);
   matb channels[3];
   split(imRGB, channels);
-  //im = 0.5*(channels[2]+channels[1]);
-  //matf tmp[3];
-  float colors[3][5] = {{ 70,  40,  29, 3, -150},
-			{ 19,  21, 114, 3, -255},
-			{ 52,  68,  37, 3, -180}};
+  float colors[3][5] = {{ 70,  40,  29, 3, -300},
+			{ 19,  21, 114, 3, -400},
+			{ 52,  68,  37, 3, -350}};
   Mat imdisp = imRGB.clone();
-  //cvtColor(im, imdisp, CV_GRAY2RGB);
   bool found = true;
   vector<Point2f> corners[3];
   for (int j = 0; j < 3; ++j) {
     matb im;
-    //for (int i = 0; i < 3; ++i)
-      //channels[i].convertTo(tmp[i], CV_32F, 1., -colors[j][i]);
-      //channels[i].convertTo(tmp[i], CV_32F);
-    //((matf)(tmp[0].mul(tmp[0])+tmp[1].mul(tmp[1])+tmp[2].mul(tmp[2])))
-    //.convertTo(im, CV_8U, colors[j][3]);
     matf tmp2(imRGB.size()), tmp3;
     for (int x = 0; x < tmp2.size().width; ++x)
       for (int y = 0; y < tmp2.size().height; ++y) {
@@ -174,7 +170,6 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
 	}
 	tmp2(y, x) = c / sqrt(n1*n2);
       }
-    //tmp2 = 1.-tmp2;
     double m;
     minMaxLoc(tmp2, NULL, &m, NULL, NULL);
     threshold(tmp2, tmp3, m-5./255, 1, THRESH_BINARY);
@@ -183,13 +178,9 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
     dilate(tmp3, tmp3, kernel);
     tmp2 = tmp3.mul(imGrayf) + (1-tmp3);
     tmp2.convertTo(im, CV_8U, colors[j][3]*255., colors[j][4]);
-    //equalizeHist(im, im);
-    //matb tmp4;
-    //tmp3.convertTo(tmp4, CV_8U, -1, 1);
-    //im += 255*tmp4;
     
     bool foundElem = findChessboardCorners(im, pattern, corners[j],
-					   CALIB_CB_FAST_CHECK);
+					   CALIB_CB_FAST_CHECK|CV_CALIB_CB_ADAPTIVE_THRESH);
     //drawChessboardCorners(imdisp, pattern, corners[j], foundElem);
     drawChessboardCorners(im, pattern, corners[j], foundElem);
     found &= foundElem;
@@ -382,8 +373,7 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
       assert(features.size() == 0);
       for (int i = 0; i < nGC; ++i) {
 	const Point2f & pt = goodCorners[i].pt;
-	features.push_back(Feature(kalman, i, imGray, pt, cornersPos[i],
-				   d, d, Feature::Point));
+	features.push_back(Feature(*this, i, imGray, pt, cornersPos[i], d, d));
 	kalman.setPt3d(i, cornersPos[i]);
 	kalman.setPt3dCov(i, 5e-2);
 	line(imdisp, goodCorners[i].pt, goodCorners[i].pt, Scalar(0, 0, 0), 2*d+1);
@@ -400,7 +390,6 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
 	matf p = K * R * (points.row(i).t() - t);
 	p = p/p(2);
 	Point pt(p(0), p(1));
-	cout << pt << endl;
 	line(imdisp, pt, pt, Scalar(255,255,255), 10);
       }
     }
@@ -408,8 +397,6 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
 
     imshow("disp", imdisp);
     cvWaitKey(0);
-    
-    cout << kalman << endl;
   }
   return found;
 }
