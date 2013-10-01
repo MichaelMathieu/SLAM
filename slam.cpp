@@ -65,6 +65,7 @@ void SLAM::newImage(const mat3b & imRGB) {
     matchLines(im, lineMatches, 0.9f);
     for (size_t i = 0; i < lineMatches.size(); ++i) {
       Point2f pt = lineMatches[i].pos;
+      line(imdisp, pt, pt, Scalar(255,255,255), 20);
       matf pt2d(2,1); pt2d(0) = pt.x; pt2d(1) = pt.y;
       lineFeatures[lineMatches[i].iFeature].newView(pt2d);
       lineFeatures[lineMatches[i].iFeature].cone.display(imdisp, kalman.getP());
@@ -73,46 +74,8 @@ void SLAM::newImage(const mat3b & imRGB) {
     // add new features
     computeNewLines(im, pointMatches,
 		    //minTrackedPerImage-pointMatches.size()-lineMatches.size(),
-		    1-lineFeatures.size(),
-		    100.f, 50, 50);
-    /*
-    if (lineFeatures.size() == 0) {
-      matf p0(4,1,0.0f); p0(3) = 1.0f;
-      matf proj0m = kalman.getP() * p0;
-      Point2f proj0(proj0m(0)/proj0m(2), proj0m(1)/proj0m(2));
-      addNewLine(im, proj0, 50, 50);
-    }
-    */    
+		    3-lineFeatures.size(), 100.f, 40, 40);
     
-    // debug display
-    {
-      /*
-      matf P = kalman.getP();
-      //for (size_t i = 0; i < lineFeatures.size(); ++i) {
-      for (size_t i = 0; i < 1; ++i) {
-	matf debug(imdisp.size(), 0.0f);
-	//projectGaussian(kalman.getPt3d(iKalman), kalman.getPt3dCov(iKalman),
-	//debug);
-	matf p1 = lineFeatures[i].projPCenter(P);
-	matf p2 = lineFeatures[i].projPInf(P);
-	line(imdisp, Point2i(round(p1(0)),round(p1(1))),
-	     Point2i(round(p2(0)),round(p2(1))),
-	     Scalar(255,0,0));
-      }
-      */
-      matf P = kalman.getP();
-      for (size_t i = 0; i < lineMatches.size(); ++i) {
-	Point2i pt = lineMatches[i].pos;
-	const LineFeature & feature = lineFeatures[lineMatches[i].iFeature];
-	for (size_t j = 0; j < feature.nPot(); ++j) {
-	  matf p = P * feature.posPot[j];
-	  Point2i pt2(p(0)/p(2),p(1)/p(2));
-	  line(imdisp, pt2, pt2, Scalar(0,0,255/5*j), 1);
-	}
-	line(imdisp, pt, pt, Scalar(0,255,0), 1);
-      }
-    }
-
     // convert good lines to points
     {
       matf p3dline, covline;
@@ -124,7 +87,7 @@ void SLAM::newImage(const mat3b & imRGB) {
       }
     }
 
-    // debug display (2)
+    // debug display
    
     for (size_t i = 0; i < pointMatches.size(); ++i) {
       circle(imdisp, pointMatches[i].pos, 5, Scalar(0, 0, 255));
@@ -138,7 +101,7 @@ void SLAM::newImage(const mat3b & imRGB) {
 
     imshow("disp", imdisp);
     cvWaitKey(1);
-    visualize();
+    //visualize();
   }
 }
 

@@ -2,9 +2,15 @@ CXX=g++
 LIBS=`pkg-config --libs opencv`
 FLAGS=-W -fpic -O3 -funroll-loops -fopenmp
 FLAGS=-W -fpic  -g
-SRCS=kalman.cpp mongoose.cpp visualize.cpp matching.cpp new_point.cpp cone.cpp slam.cpp
-HEADERS=slam.hpp
-OBJS = $(SRCS:.cpp=.o)
+SRCS=kalman.cpp mongoose.cpp visualize.cpp matching.cpp new_point.cpp cone.cpp lineFeature.cpp
+MAIN=slam.cpp
+SRCSTEST=tests.cpp test_matching.cpp
+OBJS=$(SRCS:.cpp=.o)
+MAINOBJ=$(MAIN:.cpp=.o)
+OBJSTEST=$(SRCSTEST:.cpp=.o)
+OBJSTESTPREFFIX=$(addprefix ${TEST_FOLDER}/,${OBJSTEST})
+TEST_FOLDER=tests
+
 ARCH=$(shell bash -c 'if [[ `uname -a` =~ "x86" ]]; then echo "__x86__"; else echo "__ARM__"; fi')
 ifeq (${ARCH}, __ARM__)
 FLAGS+= -mfpu=neon
@@ -20,14 +26,16 @@ endif
 
 -include *.d
 
-slam: ${OBJS}
-	${CXX} ${FLAGS} ${OBJS} ${LIBS} -o slamtest
+slam: ${OBJS} ${MAINOBJ}
+	${CXX} ${FLAGS} ${OBJS} ${MAINOBJ} ${LIBS} -o slamtest
 
-kalman: kalman.cpp kalman.o
-	${CXX} ${FLAGS} kalman.o ${LIBS} -o kalmantest
+test0: ${OBJSTESTPREFFIX}
 
-sim: simulation.cpp kalman.cpp simulation.o kalman.o
-	${CXX} ${FLAGS} kalman.o simulation.o ${LIBS} -o simul
+test: ${OBJS}
+	rm -f ${TEST_FOLDER}/*.o
+	make test0
+	${CXX} ${FLAGS} ${OBJS} ${OBJSTESTPREFFIX} ${LIBS} -o ${TEST_FOLDER}/unit_tests
+	${TEST_FOLDER}/unit_tests
 
 clean:
 	rm -rf *.o *.d simul kalmantest slamtest

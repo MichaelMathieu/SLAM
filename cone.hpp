@@ -32,13 +32,16 @@ public:
   virtual float logEvaluateLocalCoord(const matf & local) const;
   inline matf getBinCenterLocalCoord(int di, int xi, int yi) const;
   inline matf getBinCenterLocalCoord(const cv::Point3i & coord) const;
+  inline matf getBinCenterGlobalCoord(int di, int xi, int yi) const;
+  inline matf getBinCenterGlobalCoord(const cv::Point3i & coord) const;
   inline matf getBinSize(int di, int xi, int yi) const;
   inline void normalize();
-  inline float getVal(int di, int xi, int yi) const;
+  inline float getProba(int di, int xi, int yi) const;
   inline cv::Point3i getMaxP(float* val = NULL) const;
   inline matf getMaxPGlobalCoord(matf* cov = NULL) const;
   inline matf getBinCovLocalCoord(int di, int xi, int yi) const;
   inline matf getBinCovGlobalCoord(int di, int xi, int yi) const;
+  inline cv::Point3i getNBins() const;
   void intersect(const BaseCone & other);
   void print() const;
   void display(cv::Mat & im, const matf & P) const;
@@ -64,6 +67,14 @@ matf BinCone::getBinCenterLocalCoord(int di, int xi, int yi) const {
 
 matf BinCone::getBinCenterLocalCoord(const cv::Point3i & coord) const {
   return getBinCenterLocalCoord(coord.x, coord.y, coord.z);
+}
+
+matf BinCone::getBinCenterGlobalCoord(int di, int xi, int yi) const {
+  return getGlobalCoordFromLocal(getBinCenterLocalCoord(di,xi,yi));
+}
+
+matf BinCone::getBinCenterGlobalCoord(const cv::Point3i & coord) const {
+  return getGlobalCoordFromLocal(getBinCenterLocalCoord(coord.x, coord.y, coord.z));
 }
 
 matf BinCone::getBinSize(int di, int xi, int yi) const {
@@ -93,8 +104,8 @@ void BinCone::normalize() {
   bins -= norm;
 }
 
-float BinCone::getVal(int di, int xi, int yi) const {
-  return bins(di, xi, yi);
+float BinCone::getProba(int di, int xi, int yi) const {
+  return exp(bins(di, xi, yi));
 }
 
 cv::Point3i BinCone::getMaxP(float* val) const {
@@ -125,6 +136,10 @@ matf BinCone::getBinCovLocalCoord(int di, int xi, int yi) const {
 
 matf BinCone::getBinCovGlobalCoord(int di, int xi, int yi) const {
   return base.t() * getBinCovLocalCoord(di,xi,yi) * base;
+}
+
+cv::Point3i BinCone::getNBins() const {
+  return cv::Point3i(nD, nR, nR);
 }
 
 #endif

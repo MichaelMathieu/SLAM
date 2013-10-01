@@ -55,9 +55,8 @@ void BinCone::intersect(const BaseCone & other) {
   for (int di = 0; di < nD; ++di)
     for (int xi = 0; xi < nR; ++xi)
       for (int yi = 0; yi < nR; ++yi) {
-	matf local1Pt = getBinCenterLocalCoord(di, xi, yi);
-	matf globalPt = getGlobalCoordFromLocal(local1Pt);
-	matf local2Pt = other.getLocalCoordFromGlobal(globalPt);
+	matf global1Pt = getBinCenterGlobalCoord(di, xi, yi);
+	matf local2Pt = other.getLocalCoordFromGlobal(global1Pt);
 	float otherval = other.logEvaluateLocalCoord(local2Pt);
 	//	cout << di << " " << xi << " " << yi << " " << otherval << endl;
 	//cout << " " << local1Pt << "\n " << globalPt << "\n " << local2Pt << endl;
@@ -66,7 +65,7 @@ void BinCone::intersect(const BaseCone & other) {
   normalize();
   //print();
   float maxp;
-  cout << getGlobalCoordFromLocal(getBinCenterLocalCoord(getMaxP(&maxp))) << endl;
+  cout << getBinCenterGlobalCoord(getMaxP(&maxp)) << endl;
   cout << maxp << endl;
   //if (isnan(sum(bins)[0]))
   //exit(0);
@@ -90,7 +89,7 @@ void BinCone::display(Mat & im, const matf & P) const {
   for (int di = 0; di < nD; ++di)
     for (int xi = 0; xi < nR; ++xi)
       for (int yi = 0; yi < nR; ++yi) {
-	const matf p3d = getGlobalCoordFromLocal(getBinCenterLocalCoord(di,xi,yi));
+	const matf p3d = getBinCenterGlobalCoord(di,xi,yi);
 	const matf p = R * p3d + p4;
 	const Point2i pt2d(round(p(0)/p(2)), round(p(1)/p(2)));
 	float prob = exp(bins(di, xi, yi));
