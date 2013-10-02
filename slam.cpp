@@ -31,14 +31,22 @@ void SLAM::newImage(const mat3b & imRGB) {
     Mat & imdisp = imdisp_debug;
     cvtColor(im, imdisp, CV_GRAY2BGR);
 
-    matf R = mongooseAlign.t() * mongoose.rotmat.t() * mongooseAlign;
-    deltaR = R * lastR.t();
-    kalman.setRVel(rotmat2TaitBryan(deltaR));
-    R.copyTo(lastR);
+    { // mongoose
+      matf R = mongooseAlign.t() * mongoose.rotmat.t() * mongooseAlign;
+      deltaR = R * lastR.t();
+      kalman.setRVel(rotmat2TaitBryan(deltaR));
+      R.copyTo(lastR);
+    }
+
+    // CameraState estimated with IMU alone
+    matf R = deltaR * kalman.getRot().toMat();
+    CameraState statePrior(K, R, kalman.getPos());
     
     // match points
     vector<Match> pointMatches;
-    matchPoints(im, pointMatches, 0.98f);
+    matchPoints(im, statePrior, pointMatches, 0.98f);
+
+    // update the EKF
     if (pointMatches.size() > 0) {
       //TODO: the next delta is greater
       vector<int> activePts;
@@ -59,6 +67,8 @@ void SLAM::newImage(const mat3b & imRGB) {
 	kalman.renormalize();
       }
     }
+    
+    CameraState statePosterior(kalman);
 
     // match lines
     vector<Match> lineMatches;
@@ -82,7 +92,7 @@ void SLAM::newImage(const mat3b & imRGB) {
       for (int i = lineMatches.size()-1; i >= 0; --i) {
 	int iFeature = lineMatches[i].iFeature;
 	if (lineFeatures[iFeature].isLocalized()) {
-	  lineToFeature(im, lineMatches[i].pos, iFeature);
+	  lineToFeature(im, statePosterior, lineMatches[i].pos, iFeature);
 	}
       }
     }
@@ -282,6 +292,7 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
     // Set camera position
     kalman.setPos(tvecf);
     kalman.setRot(q);
+    CameraState stateInit(kalman);
 
     // Initialize features and 3d points
     {
@@ -336,7 +347,7 @@ bool SLAM::newInitImage(const mat3b & imRGB, const Size & pattern) {
       assert(features.size() == 0);
       for (int i = 0; i < nGC; ++i) {
 	const Point2f & pt = goodCorners[i].pt;
-	features.push_back(Feature(*this, i, imGray, pt, cornersPos[i], d, d));
+	features.push_back(Feature(imGray, stateInit, i, pt, cornersPos[i], d, d));
 	kalman.setPt3d(i, cornersPos[i]);
 	kalman.setPt3dCov(i, 5e-2);
 	line(imdisp, goodCorners[i].pt, goodCorners[i].pt, Scalar(0, 0, 0), 2*d+1);

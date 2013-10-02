@@ -32,8 +32,10 @@ public:
 private:
   static std::vector<pf> testers;
   static std::vector<std::string> names;
+public:
+  static bool test_project();
 };
 
-#define NEW_F(f) {Tester::newF(f, "f");}
+#define NEW_F(f) {Tester::newF(f, #f);}
 
 #endif

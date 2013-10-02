@@ -6,82 +6,6 @@ using namespace std;
 
 extern Mat imdisp_debug;
 
-SLAM::Feature::Feature(const SLAM & slam, int iKalman,
-		       const Mat_<imtype> & im, const Point2i & pt2d,
-		       const matf & pos3d, int dx, int dy)
-  :pslam(&slam), iKalman(iKalman), descriptor(2*dy, 2*dx), B(4,3) {
-  newDescriptor(slam.kalman.getP(), im, pt2d); // TODO: P
-}
-
-SLAM::Feature::Feature(const SLAM & slam, int iKalman,
-		       const Mat_<imtype> & descr,
-		       const matf & pos3d)
-  :pslam(&slam), iKalman(iKalman), descriptor(descr), B(4,3) {
-  computeParams(pos3d);
-}
-
-void SLAM::Feature::computeParams(const matf & p3d) {
-  matf P = pslam->kalman.getP(); //TODO P
-  matf Rm = pslam->kalman.getRot().inv().toMat(); //TODO bufferize
-  matf M = P(Range(0,3),Range(0,3));
-  matf c = P(Range(0,3),Range(3,4));
-  matf Mu = M*Rm.col(0);
-  matf Mv = M*Rm.col(1);
-  matf Mp = M*p3d;
-  float cp3 = c(2) + Mp(2);
-  float alpha = ((Mu(0) - Mu(2)) * cp3 - Mu(2)*(c(0)+Mp(0))) / (cp3*cp3);
-  float beta  = ((Mv(1) - Mv(2)) * cp3 - Mv(2)*(c(1)+Mp(1))) / (cp3*cp3);
-  B(Range(0,3),Range(0,1)) = Rm.col(0) / alpha;
-  B(Range(0,3),Range(1,2)) = Rm.col(1) / beta;
-  p3d.copyTo(B(Range(0,3),Range(2,3)));
-  B(3,0) = B(3,1) = 0.0f;
-  B(3,2) = 1.0f;
-}
-
-void SLAM::Feature::newDescriptor(const matf & P, const cv::Mat_<imtype> & im,
-				  const Point2i & pt2d) {
-  int h = im.size().height, w = im.size().width;
-  int dx = descriptor.size().width/2, dy = descriptor.size().height/2;
-  Mat_<imtype> newdescr = im(Range(max(0, pt2d.y-dy), min(h, pt2d.y+dy)),
-			     Range(max(0, pt2d.x-dx), min(w, pt2d.x+dx)));
-  newdescr.copyTo(descriptor);
-  computeParams(pslam->kalman.getPt3d(iKalman));
-}
-
-Mat_<SLAM::imtype> SLAM::Feature::project(const matf & P,
-					  Mat_<SLAM::imtype> & mask) const {
-  matf A = P * B;
-  int dx = descriptor.size().width/2, dy = descriptor.size().height/2;
-  const float gc[4][2] = {{-dx,-dy},{-dx,dy},{dx,dy},{dx,-dy}}; //TODO: once &for all
-  matf corners(4,3);
-  matf p (3,1,1.0f);
-  for (int i = 0; i < 4; ++i) {
-    p(0) = gc[i][0];
-    p(1) = gc[i][1];
-    corners.row(i) = (A*p).t();
-    corners.row(i) /= corners(i,2);
-  }
-  int xmin = 1e6, xmax = -1e6, ymin = 1e6, ymax = -1e6;
-  for (int i = 0; i < 4; ++i) {
-    xmin = min(xmin, (int)ceil(corners(i,0)));
-    xmax = max(xmax, (int)floor(corners(i,0)));
-    ymin = min(ymin, (int)ceil(corners(i,1)));
-    ymax = max(ymax, (int)floor(corners(i,1)));
-  }
-  Mat_<imtype> proj(ymax-ymin, xmax-xmin, 0.0f);
-
-  matf Am = A.inv();
-  p(0) = xmin; p(1) = ymin; p(2) = 1.0f;
-  Am.col(2) = Am * p;
-  Am.row(0) += dx * Am.row(2);
-  Am.row(1) += dy * Am.row(2);
-  
-  warpPerspective(descriptor, proj, Am, proj.size(), WARP_INVERSE_MAP|INTER_LINEAR);
-  warpPerspective(Mat_<imtype>(descriptor.size(), 1), mask, Am, proj.size(),
-		  WARP_INVERSE_MAP|INTER_NEAREST);
-  return proj;
-}
-
 Point2i SLAM::matchFeatureInArea(const Mat_<imtype> & im,
 				 const Mat_<imtype> & patch,
 				 const Mat_<imtype> * patchMask,
@@ -164,9 +88,9 @@ Point2i SLAM::matchFeatureInArea(const Mat_<imtype> & im,
 	    const int db = max(0,y0+y+ph-h);
 	    if ((dt+db < ph) && (dr+dl < pw)) {
 	      const Mat_<imtype> imarea    =         im(Range(y0+y+dt, y0+y+ph-db),
-						        Range(x0+x+dl, x0+x+pw-dr));
+							Range(x0+x+dl, x0+x+pw-dr));
 	      const Mat_<imtype> patcharea =     patch0(Range(dt, ph-db),
-						        Range(dl, pw-dr));
+							Range(dl, pw-dr));
 	      const Mat_<imtype> maskarea  = patchMask0(Range(dt, ph-db),
 							Range(dl, pw-dr));
 	      imdotmask = imarea.mul(maskarea);
@@ -186,7 +110,7 @@ Point2i SLAM::matchFeatureInArea(const Mat_<imtype> & im,
 	for (x = xl0; x < xl1; x += stride)
 	  for (y = yl0; y < yl1; y += stride) {
 	    const Mat_<imtype> imarea = im(Range(y0+y, y0+y+ph),
-					   Range(x0+x, x0+x+pw));
+					    Range(x0+x, x0+x+pw));
 	    imdotmask = imarea.mul(patchMask0);
 	    const float cc = imdotmask.dot(patch0);
 	    const float i2 = norm(imdotmask);
@@ -253,9 +177,9 @@ Point2i SLAM::matchFeatureInArea(const Mat_<imtype> & im,
 	    const int db = max(0,y0+y+ph-h);
 	    if ((dt+db < ph) && (dr+dl < pw)) {
 	      const Mat_<imtype> imarea    =         im(Range(y0+y+dt, y0+y+ph-db),
-							Range(x0+x+dl, x0+x+pw-dr));
+							 Range(x0+x+dl, x0+x+pw-dr));
 	      const Mat_<imtype> patcharea =      patch(Range(dt, ph-db),
-							Range(dl, pw-dr));
+							 Range(dl, pw-dr));
 	      const float cc = imarea.dot(patcharea);
 	      const float i2 = norm(imarea);
 	      const float p2 = norm(patcharea);
@@ -281,9 +205,9 @@ Point2i SLAM::matchFeatureInArea(const Mat_<imtype> & im,
 	  const int db = max(0,y0+y+ph-h);
 	  if ((dt+db < ph) && (dr+dl < pw)) {
 	    const Mat_<imtype> imarea    =         im(Range(y0+y+dt, y0+y+ph-db),
-						      Range(x0+x+dl, x0+x+pw-dr));
+						       Range(x0+x+dl, x0+x+pw-dr));
 	    const Mat_<imtype> patcharea =      patch(Range(dt, ph-db),
-						      Range(dl, pw-dr));
+						       Range(dl, pw-dr));
 	    const float cc = imarea.dot(patcharea);
 	    const float i2 = norm(imarea);
 	    const float p2 = norm(patcharea);
@@ -303,91 +227,27 @@ Point2i SLAM::matchFeatureInArea(const Mat_<imtype> & im,
   return out;
 }
 
-Point2i SLAM::trackFeatureElem(const Mat_<imtype> & im, const Mat_<imtype> & proj,
-			       const Mat_<imtype> & projmask,
-			       float searchrad,
-			       const Point2i & c, int stride,
-			       float & response) const {
-  matf result; // TODO: reuse storage
-  int hx = ceil(searchrad), hy = ceil(searchrad);
-  int ih = im.size().height, iw = im.size().width;
-  const int dx = floor(proj.size().width*0.5f);
-  const int dy = floor(proj.size().height*0.5f);
-  
-  if ((c.x+hx < 0) || (c.y+hy < 0) || (c.x-hx >= iw) || (c.y-hy >= ih))
-    return Point2i(-1,-1);
-  
-  matb area(2*hy, 2*hx, 0.f); // TODO reuse
-  float sqrad = sq(searchrad);
-  for (int i = 0; i < 2*hx; ++i)
-    for (int j = 0; j < 2*hy; ++j) {
-      float d = sq(i-hx)+sq(j-hy);
-      if (d < sqrad)
-	area(j,i) = 1;
-    }
-
-  Point2i maxp = matchFeatureInArea(im, proj, &projmask,
-				    Rect(max(0,c.x-hx), max(0,c.y-hy), 2*hx, 2*hy),
-				    &area, stride, response);
-  
-  return maxp;
-}
-
-Point2i SLAM::trackFeature(const Mat_<imtype>* im, int subsample, int ifeature,
-			   float threshold, const matf & P,
-			   float & response, Mat* disp) const {
-  float searchrad = 35; // TODO
-  int stride = 2;
-  matf p = P * kalman.getPt3dH(features[ifeature].iKalman);
-  Point2i c(round(p(0)/p(2)), round(p(1)/p(2)));
-  Mat_<imtype> projmask;
-  Mat_<imtype> proj = features[ifeature].project(P, projmask);
-  Mat_<imtype> projsubs, projmasksubs;
-  resize(proj, projsubs, Size(proj.size().width/subsample,
-			      proj.size().height/subsample));
-  resize(projmask, projmasksubs, projsubs.size());
-  Point2i csubs(c.x/subsample, c.y/subsample);
-
-  Point2i pos = trackFeatureElem(im[0], projsubs, projmasksubs,
-				 searchrad/subsample,
-				 csubs, stride, response);
-  if (response > 0.66 * threshold) {
-    response = -1.f;
-    pos = trackFeatureElem(im[1], proj, projmask, stride*subsample,
-			   Point2i(pos.x*subsample, pos.y*subsample),
-			   1, response);
-    if (disp && (response > threshold))
-      cvCopyToCrop(proj, disp[1], Rect(pos.x-floor(0.5*proj.size().width),
-				       pos.y-floor(0.5*proj.size().height),
-				       proj.size().width, proj.size().height));
-  }
-  return pos;
-}
-
-void SLAM::matchPoints(const Mat_<imtype> & im, std::vector<Match> & matches,
-		       float threshold) {
+void SLAM::matchPoints(const Mat_<imtype> & im, const CameraState & state,
+		       std::vector<Match> & matches, float threshold) {
   matf disp[2] = {matf(im.size().height, im.size().width, 0.0f),
 		  matf(im.size().height, im.size().width, 128.f)};
 
-  matf P = matf(3,4,0.0f);
-  P(Range(0,3),Range(0,3)) = deltaR * kalman.getRot().toMat();
-  P(Range(0,3),Range(3,4)) = - P(Range(0,3),Range(0,3)) * kalman.getPos();
-  P = K*P;
 
-  Mat_<imtype> imsubsampled;
-  int subsample = 3;
-  resize(im, imsubsampled, Size(im.size().width/subsample,
-				im.size().height/subsample));
-  Mat_<imtype> imsubsamples[] = {imsubsampled, im};
+  int stride = 3;
+  vector<float> subsamples;
+  subsamples.push_back(1.f);
+  subsamples.push_back(3.f);
+  ImagePyramid<imtype> pyramid(im, subsamples);
 
   float response;
   for (size_t i = 0; i < features.size(); ++i) {
-    const Point2i pos = trackFeature(imsubsamples, subsample, i,
-				     threshold, P, response, disp);
+    const Point2i pos = features[i].track(pyramid, state,
+					  kalman.getPt3d(features[i].iKalman),
+					  threshold, stride, response, disp);
     if (response > threshold) {
       matches.push_back(Match(pos, i));
       //if (response < 0.5f+0.5f*threshold)
-      //features[i].newDescriptor(P, im, pos);
+      //  features[i].newDescriptor(P, im, pos);
     }
   }
 

@@ -21,7 +21,10 @@ public:
 	assert(subsamples[i-1] < subsamples[i]);
       float sub = subsamples[i];
       mati imSub;
-      resize(imFullSize, imSub, cv::Size(round(w/sub), round(h/sub)));
+      if (sub == 1)
+	imSub = imFullSize.clone();
+      else
+	resize(imFullSize, imSub, cv::Size(round(w/sub), round(h/sub)));
       images.push_back(imSub);
     }
   }

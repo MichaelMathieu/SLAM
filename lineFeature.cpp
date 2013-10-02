@@ -137,9 +137,9 @@ Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
   float desch = descriptor.size().height, descw = descriptor.size().width;
   // 1) track in the area at lowest resolution
   resize(descriptor, totrack, Size(round(descw*areaRes), round(desch*areaRes)));
-  Point2i trackedPoint = SLAM::matchFeatureInArea(pyramid.images[nSubs-1], totrack,
-						  NULL, areaRect, &areaMask, stride,
-						  response);
+  Point2i trackedPoint = matchFeatureInArea(pyramid.images[nSubs-1],
+					    totrack, NULL, areaRect,
+					    &areaMask, stride, response);
   
   cout << "Tracked " << trackedPoint*(1./areaRes) << " response=" << response<< endl;
   trackedPoint *= 1./areaRes;

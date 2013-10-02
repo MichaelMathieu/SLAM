@@ -162,14 +162,14 @@ void SLAM::addNewLine(const Mat_<imtype> & im, const Point2f & pt2d,
   //TODO: P is computed once again
 }
 
-void SLAM::lineToFeature(const Mat_<imtype> & im, const Point2i & pt2d,
-			 int iLineFeature) {
+void SLAM::lineToFeature(const Mat_<imtype> & im, const CameraState & state,
+			 const Point2i & pt2d, int iLineFeature) {
   matf cov;
   matf p3d = lineFeatures[iLineFeature].cone.getMaxPGlobalCoord(&cov);
   kalman.addNewPoint(p3d, cov);
   int iKalman = kalman.getNPts()-1;
   int dx = lineFeatures[iLineFeature].descriptor.size().width/2;
   int dy = lineFeatures[iLineFeature].descriptor.size().height/2;
-  features.push_back(Feature(*this, iKalman, im, pt2d, p3d, dx, dy));
+  features.push_back(Feature(im, state, iKalman, pt2d, p3d, dx, dy));
   lineFeatures.erase(lineFeatures.begin()+iLineFeature);
 }
