@@ -38,7 +38,7 @@ void SLAM::newImage(const mat3b & imRGB) {
       R.copyTo(lastR);
     }
 
-    // CameraState estimated with IMU alone
+    // CameraState estimated with prev + IMU alone
     matf R = deltaR * kalman.getRot().toMat();
     CameraState statePrior(K, R, kalman.getPos());
     
@@ -68,6 +68,7 @@ void SLAM::newImage(const mat3b & imRGB) {
       }
     }
     
+    // CameraState estimated from prev + IMU + tracked points
     CameraState statePosterior(kalman);
 
     // match lines

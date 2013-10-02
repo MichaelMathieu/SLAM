@@ -151,8 +151,9 @@ Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
     cvCopyToCrop(descriptor, imdisp, Rect(trackedPoint.x-dw/2, trackedPoint.y-dh/2, dw, dh));
     imdisp /= 255.;
   }
-  return trackedPoint;
-  /*
+  //return trackedPoint;
+
+  //TODO: reactivate (and i think the first step is at res 1)
   // 2) refine tracking
   if (response > threshold * 0.67) {
     for (int iSub = nSubs-2; iSub >= 0; --iSub) {
@@ -160,18 +161,17 @@ Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
       float sub = pyramid.subsamples[iSub];
       int laststride = stride;
       int newstride = (iSub == 0) ? 1 : stride;
-      trackedPoint *= lastsub/sub;
       int searchRad = sub/lastsub*laststride/newstride;
-      Rect areaRect(trackedPoint.x-searchRad, trackedPoint.y-searchRad,
+      Rect areaRect(trackedPoint.x/sub-searchRad, trackedPoint.y/sub-searchRad,
 		    2*searchRad+1, 2*searchRad+1);
       resize(descriptor, totrack, Size(descw/sub, desch/sub));
       trackedPoint = SLAM::matchFeatureInArea(pyramid.images[iSub], totrack,
 					      NULL, areaRect, NULL, newstride,
 					      response);
+      trackedPoint *= sub;
       if (response < threshold * 0.67)
 	break;
     }
   }
-  */
-  //return trackedPoint;
+  return trackedPoint;
 }		 

@@ -25,7 +25,7 @@ private:
 
   struct CameraState {
     const matf K, R, t;
-    matf Rinv, P, KR;
+    matf Rinv, P, KR, KRinv;
     explicit inline CameraState(const KalmanSLAM & kalman);
     inline CameraState(const matf & K, const matf & R, const matf & t);
     inline matf project(const matf & p) const;
@@ -41,7 +41,7 @@ private:
 	    const matf & p3d);
     void computeParams(const CameraState & state, const matf & p3d);
     cv::Mat_<imtype> project(const CameraState & state, const matf & p3d,
-			     cv::Mat_<imtype> & mask) const;
+			     cv::Mat_<imtype> & mask, cv::Rect & location) const;
     void newDescriptor(const cv::Mat_<imtype> & im, const CameraState & state,
 		       const cv::Point2i & pt2d, const matf & p3d);
     cv::Point2i track(const ImagePyramid<imtype> & pyramid,
@@ -113,20 +113,22 @@ public:
 
 SLAM::CameraState::CameraState(const KalmanSLAM & kalman)
   :K(kalman.getK()), R(kalman.getRot().toMat()), t(kalman.getPos()),
-   Rinv(3,3), P(3,4), KR() {
+   Rinv(3,3), P(3,4), KR(), KRinv(3,3) {
   Rinv = R.inv();
   R.copyTo(P(cv::Range(0,3),cv::Range(0,3)));
   P(cv::Range(0,3),cv::Range(3,4)) = - R * t;
   P = K * P;
   KR = P(cv::Range(0,3),cv::Range(0,3));
+  KRinv = KR.inv();
 }
 
 SLAM::CameraState::CameraState(const matf & K, const matf & R, const matf & t)
-  :K(K), R(R), t(t), Rinv(R.inv()), P(3,4), KR() {
+  :K(K), R(R), t(t), Rinv(R.inv()), P(3,4), KR(), KRinv(3,3) {
   R.copyTo(P(cv::Range(0,3),cv::Range(0,3)));
   P(cv::Range(0,3),cv::Range(3,4)) = - R * t;
   P = K * P;
   KR = P(cv::Range(0,3),cv::Range(0,3));
+  KRinv = KR.inv();
 }
 
 matf SLAM::CameraState::project(const matf & p) const {

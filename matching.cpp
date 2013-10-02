@@ -246,8 +246,9 @@ void SLAM::matchPoints(const Mat_<imtype> & im, const CameraState & state,
 					  threshold, stride, response, disp);
     if (response > threshold) {
       matches.push_back(Match(pos, i));
-      //if (response < 0.5f+0.5f*threshold)
-      //  features[i].newDescriptor(P, im, pos);
+      if (response < 0.5f+0.5f*threshold)
+	features[i].newDescriptor(im, state, pos,
+				  kalman.getPt3d(features[i].iKalman));
     }
   }
 
@@ -264,10 +265,10 @@ void SLAM::matchPoints(const Mat_<imtype> & im, const CameraState & state,
 
 void SLAM::matchLines(const Mat_<imtype> & im, vector<Match> & matches,
 		      float threshold) const {
-  int stride = 1; //TODO: stride, subsample
+  int stride = 2;
   vector<float> subsamples;
   subsamples.push_back(1);
-  //subsamples.push_back(2);
+  subsamples.push_back(2);
   ImagePyramid<imtype> impyramid(im, subsamples); // TODO: computed twice
   matf P = kalman.getP(); //TODO multiple times, careful about up to date
 

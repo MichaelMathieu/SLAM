@@ -45,7 +45,13 @@ void SLAM::Feature::newDescriptor(const cv::Mat_<imtype> & im,
 }
 
 Mat_<SLAM::imtype> SLAM::Feature::project(const CameraState & state, const matf & p3d,
-					  Mat_<SLAM::imtype> & mask) const {
+					  Mat_<SLAM::imtype> & mask,
+					  Rect & location) const {
+  if ((descriptor.size().width <= 0) || (descriptor.size().height <= 0)) {
+    location = Rect(0,0,0,0);
+    return Mat_<imtype>(0,0);
+  }
+  
   p3d.copyTo(B(Range(0,3),Range(2,3)));
   matf A = state.P * B;
   int dx = descriptor.size().width/2, dy = descriptor.size().height/2;
@@ -65,7 +71,14 @@ Mat_<SLAM::imtype> SLAM::Feature::project(const CameraState & state, const matf 
     ymin = min(ymin, (int)ceil(corners(i,1)));
     ymax = max(ymax, (int)floor(corners(i,1)));
   }
-  Mat_<imtype> proj(ymax-ymin, xmax-xmin, 0.0f);
+  location.x = xmin;
+  location.y = ymin;
+  location.width = max(0,xmax-xmin);
+  location.height = max(0,ymax-ymin);
+  if ((location.width == 0) || (location.height == 0))
+    return Mat_<imtype>(0,0);
+  
+  Mat_<imtype> proj(location.height, location.width, 0.0f);
 
   matf Am = A.inv();
   p(0) = xmin; p(1) = ymin; p(2) = 1.0f;
@@ -84,8 +97,9 @@ Point2i SLAM::Feature::track(const ImagePyramid<imtype> & pyramid,
 			     float threshold, int stride, float & response,
 			     Mat* disp) const {
   int nSubs = pyramid.nSubs();
+  Rect proj_location; // TODO: use proj_location
   Mat_<imtype> proj_mask;
-  Mat_<imtype> proj = project(state, p3d, proj_mask);
+  Mat_<imtype> proj = project(state, p3d, proj_mask, proj_location);
   int projw = proj.size().width, projh = proj.size().height;
   matf p2d = state.project(p3d);
 

@@ -8,7 +8,7 @@
 
 struct Quaternion {
   typedef float realq;
-  static const realq eps_norm = 1e-20f;
+  static const realq eps_norm;
   realq a, b, c, d;
   inline Quaternion()
     :a(0.f), b(0.f), c(0.f), d(0.f) {};
@@ -125,6 +125,12 @@ struct Quaternion {
       throw std::overflow_error("Quaternion: division by zero");
     const realq in = 1.f / n;
     return Quaternion(a*in, -b*in, -c*in, -d*in);
+  }
+  inline Quaternion operator/(realq s) const {
+    return operator*(1./s);
+  }
+  inline Quaternion operator/=(realq s) {
+    return operator*=(1./s);
   }
   inline Quaternion operator/(const Quaternion & q) const {
     return operator*(q.inv());

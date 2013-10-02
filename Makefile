@@ -1,8 +1,8 @@
 CXX=g++
 LIBS=`pkg-config --libs opencv`
-FLAGS=-W -fpic -O3 -funroll-loops -fopenmp
-FLAGS=-W -fpic  -g
-SRCS=kalman.cpp mongoose.cpp visualize.cpp matching.cpp new_point.cpp cone.cpp lineFeature.cpp feature.cpp
+#FLAGS=-W -fpic -O3 -funroll-loops -fopenmp
+FLAGS=-W -fpic -g
+SRCS=kalman.cpp mongoose.cpp visualize.cpp matching.cpp new_point.cpp cone.cpp lineFeature.cpp feature.cpp quaternion.cpp random.cpp
 MAIN=slam.cpp
 SRCSTEST=tests.cpp test_matching.cpp test_project.cpp
 OBJS=$(SRCS:.cpp=.o)
@@ -15,6 +15,8 @@ ARCH=$(shell bash -c 'if [[ `uname -a` =~ "x86" ]]; then echo "__x86__"; else ec
 ifeq (${ARCH}, __ARM__)
 FLAGS+= -mfpu=neon
 endif
+
+random.o : FLAGS += -std=c++0x
 
 %.o : %.cpp
 	$(CXX) -M $(FLAGS) -o $*.P $<

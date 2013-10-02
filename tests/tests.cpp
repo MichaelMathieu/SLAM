@@ -12,7 +12,7 @@ int main () {
   NEW_F(test_matchingArea);
   NEW_F(test_matchingPatch);
   NEW_F(test_matchingPatchArea);
-  NEW_F(Tester::test_project);
+  //NEW_F(Tester::test_project);
   
   Tester::run();
   return 0;
