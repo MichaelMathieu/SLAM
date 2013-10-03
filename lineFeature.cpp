@@ -2,42 +2,25 @@
 using namespace std;
 using namespace cv;
 
-SLAM::LineFeature::LineFeature(const matf & pt2dh, const SLAM & slam,
-			       const Mat_<imtype> & desc, int n)
-  :pslam(&slam), descriptor(desc),
-   cone(slam.getLocalCoordinates(pt2dh), slam.kalman.getPos(), 3.f,
-	0.5*(slam.K(0,0)+slam.K(1,1)), 5, 100, 20,3)
-{
-  float dmin = 5, dmax = 100; //TODO
-  const matf & P = slam.kalman.getP(); // TODO: recomputed
-  matf M = P(Range(0,3),Range(0,3));
-  matf Minv = M.inv(); // TODO: recomputed
-  matf pCenter(4,1), pInf(4,1);
-  cvrange(pCenter,0,3) = -Minv*P.col(3);
-  pCenter(3) = 1.0f;
-  cvrange(pInf,0,3) = Minv * pt2dh;
-  pInf(3) = 0.0f;
-
-  for (int i = 0; i < n; ++i) {
-    float d = (dmax-dmin)*((float)i)/(n-1)+dmin;
-    float lambda = (dmax-dmin) / n;
-    matf posP = pCenter + d * pInf/norm(pInf);
-    posPot.push_back(posP);
-  };
+SLAM::LineFeature::LineFeature(const Mat_<imtype> & im, const CameraState & state,
+			       const Point2f & pt2d, int rx, int ry)
+  :descriptor(im(Range(max(0, iround(pt2d.y-ry)),
+		       min(im.size().height, iround(pt2d.y+ry+1))),
+		 Range(max(0, iround(pt2d.x-rx)),
+		       min(im.size().width, iround(pt2d.x+rx+1)))).clone()),
+   cone(state.getLocalCoordinatesPoint(pt2d), state.t, 3.f, state.f, 5,
+	100, 20, 3) /*TODO: cone parameters*/ {
 }
 
-void SLAM::LineFeature::newView(const matf & pt2d) {
-  float f = 0.5f*(pslam->K(0,0)+pslam->K(1,1)); //TODO
-  FCone newCone(pslam->getLocalCoordinates(pt2d), pslam->kalman.getPos(),
-		3./*TODO, other too*/, f);
+void SLAM::LineFeature::newView(const CameraState & state, const matf & pt2d) {
+  FCone newCone(state.getLocalCoordinatesPoint(pt2d), state.t,
+		3./*TODO, other too*/, state.f);
   cone.intersect(newCone);
 }
 
 Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
-				 const matf & P, float threshold, int stride,
-				 float & response, Mat* disp) const {
-  matf M = P(Range(0,3),Range(0,3));
-  matf p4 = P(Range(0,3),Range(3,4));
+				 const CameraState & state, float threshold,
+				 int stride, float & response, Mat* disp) const {
   int nSubs = pyramid.nSubs();
   float maxWidth = 100, maxHeight = 100;
 
@@ -61,8 +44,7 @@ Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
 	  relevantBins.push_back(binCenters.size());
 	// center
 	matf binCenter = cone.getBinCenterGlobalCoord(di, xi, yi);
-	p = M * binCenter + p4;
-	p /= p(2);
+	p = state.project(binCenter);
 	Point2i scaledPt(round(p(0)*areaRes), round(p(1)*areaRes));
 	binCenters.push_back(scaledPt);
 	// radius

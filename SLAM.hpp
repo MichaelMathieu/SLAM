@@ -9,12 +9,12 @@
 #include <opencv2/nonfree/nonfree.hpp>
 
 class Tester;
+extern cv::Mat imdisp_debug;
 
 class SLAM {
   friend class Tester;
 private:
   typedef byte imtype;
-  //public:
   const matf mongooseAlign;
   KalmanSLAM kalman;
   Mongoose mongoose;
@@ -24,11 +24,25 @@ private:
   int minTrackedPerImage;
 
   struct CameraState {
+    const float f;
     const matf K, R, t;
     matf Rinv, P, KR, KRinv;
     explicit inline CameraState(const KalmanSLAM & kalman);
     inline CameraState(const matf & K, const matf & R, const matf & t);
     inline matf project(const matf & p) const;
+    // camera coordinate :
+    //  if A = getLocalCoordinates(),
+    //  A.col(0) is the x coordinate of the image
+    //  A.col(1) is the y coordinate of the image
+    //  A.col(2) is the princical ray
+    inline matf getLocalCoordinates() const;
+    // coordinate system so that Z is held by ([p2d] - t)
+    //  where [p2d] is the 3d position of p2d
+    //  and X, Y are as close as possible to the x,y of the image.
+    //  As getLocalCoordinate, these vectors are the columns of the output
+    matf getLocalCoordinatesPoint(const cv::Point2f & pt2d) const;
+    matf getLocalCoordinatesPoint(const cv::Point2i & pt2d) const;
+    matf getLocalCoordinatesPoint(const matf & p2d) const; 
   };
 
   struct Feature {
@@ -36,14 +50,14 @@ private:
     cv::Mat_<imtype> descriptor;
     mutable matf B;
     Feature(const cv::Mat_<imtype> & im, const CameraState & state, int iKalman,
-	    const cv::Point2i & pos2d, const matf & p3d, int dx, int dy);
+	    const cv::Point2f & pt2d, const matf & p3d, int rx, int ry);
     Feature(const CameraState & state, const cv::Mat_<imtype> & descr, int iKalman,
 	    const matf & p3d);
     void computeParams(const CameraState & state, const matf & p3d);
     cv::Mat_<imtype> project(const CameraState & state, const matf & p3d,
 			     cv::Mat_<imtype> & mask, cv::Rect & location) const;
     void newDescriptor(const cv::Mat_<imtype> & im, const CameraState & state,
-		       const cv::Point2i & pt2d, const matf & p3d);
+		       const cv::Point2f & pt2d, const matf & p3d);
     cv::Point2i track(const ImagePyramid<imtype> & pyramid,
 		      const CameraState & state, const matf & p3d,
 		      float threshold, int stride, float & response,
@@ -51,19 +65,16 @@ private:
   };
 
   struct LineFeature {
-    const SLAM* pslam;
     cv::Mat_<imtype> descriptor;
-    std::vector<matf> posPot;
     BinCone cone;
-    LineFeature(const matf & pt2dh, const SLAM & slam,
-		const cv::Mat_<imtype> & desc, int n);
-    void newView(const matf & pt2d); //TODO: cov2d
+    //TODO: harmonize LineFeature constructor with Feature
+    LineFeature(const cv::Mat_<imtype> & im, const CameraState & state,
+		const cv::Point2f & pt2d, int rx, int ry);
+    void newView(const CameraState & state, const matf & pt2d); //TODO: cov2d
     inline bool isLocalized() const;
-    matf getCovOfPoint(const matf & p2d, float d, float lambda) const;
-    inline size_t nPot() const;
-    cv::Point2i track(const ImagePyramid<imtype> & pyramid, const matf & P,
-		      float threshold, int stride, float & response,
-		      cv::Mat* disp = NULL) const;
+    cv::Point2i track(const ImagePyramid<imtype> & pyramid,
+		      const CameraState & state, float threshold, int stride,
+		      float & response, cv::Mat* disp = NULL) const;
   };
 
   struct Match {
@@ -84,21 +95,18 @@ public:
 					int stride, float & response,
 					bool useExackAreaMask = false);
 private:
-  void computeNewLines(const matb & im,
+  void computeNewLines(const matb & im, const CameraState & state,
 		       const std::vector<Match> & matches,
 		       int n, float minDist, int rx = 15, int ry = 15);
   void lineToFeature(const cv::Mat_<imtype> & im, const CameraState & state,
 		     const cv::Point2i & pt2d, int iLineFeature);
-  void addNewLine(const cv::Mat_<imtype> & im, const cv::Point2f & pt2d,
-		  int rx = 15, int ry = 15);
-  matf getCovariancePointAlone(const matf & pt2d,
+  matf getCovariancePointAlone(const CameraState & state, const matf & pt2d,
 			       float Lambda, float lambda) const;
   void projectGaussian(const matf & mu, const matf & sigma, matf & output) const;
   void matchPoints(const cv::Mat_<imtype> & im, const CameraState & state,
 		   std::vector<Match> & matches, float threshold = .95f);
-  void matchLines(const cv::Mat_<imtype> & im, std::vector<Match> & matches,
-		  float threshold = 0.95f) const;
-  matf getLocalCoordinates(const matf & p2d) const;
+  void matchLines(const cv::Mat_<imtype> & im, const CameraState & state,
+		  std::vector<Match> & matches, float threshold = 0.95f) const;
 public:
   inline SLAM(const matf & K, const matf & distCoeffs, const matf & mongooseAlign,
 	      int minTrackedPerImage = 10);
@@ -111,8 +119,10 @@ public:
   void visualize() const;
 };
 
+//TODO Rinv = R.t(), change when it is sure it's ok
 SLAM::CameraState::CameraState(const KalmanSLAM & kalman)
-  :K(kalman.getK()), R(kalman.getRot().toMat()), t(kalman.getPos()),
+  :f(0.5f*(kalman.getK()(0,0) + kalman.getK()(1,1))),
+   K(kalman.getK()), R(kalman.getRot().toMat()), t(kalman.getPos()),
    Rinv(3,3), P(3,4), KR(), KRinv(3,3) {
   Rinv = R.inv();
   R.copyTo(P(cv::Range(0,3),cv::Range(0,3)));
@@ -123,7 +133,8 @@ SLAM::CameraState::CameraState(const KalmanSLAM & kalman)
 }
 
 SLAM::CameraState::CameraState(const matf & K, const matf & R, const matf & t)
-  :K(K), R(R), t(t), Rinv(R.inv()), P(3,4), KR(), KRinv(3,3) {
+  :f(0.5f*(K(0,0)+K(1,1))), K(K), R(R), t(t), Rinv(R.inv()), P(3,4),
+   KR(), KRinv(3,3) {
   R.copyTo(P(cv::Range(0,3),cv::Range(0,3)));
   P(cv::Range(0,3),cv::Range(3,4)) = - R * t;
   P = K * P;
@@ -141,14 +152,14 @@ matf SLAM::CameraState::project(const matf & p) const {
   return a.rowRange(0,2);
 }
 
+matf SLAM::CameraState::getLocalCoordinates() const {
+  return Rinv;
+}
+
 bool SLAM::LineFeature::isLocalized() const {
   float proba;
   cone.getMaxP(&proba);
   return proba > 0.75;
-}
-
-size_t SLAM::LineFeature::nPot() const {
-  return posPot.size();
 }
 
 template<typename T>

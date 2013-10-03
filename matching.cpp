@@ -263,8 +263,8 @@ void SLAM::matchPoints(const Mat_<imtype> & im, const CameraState & state,
   }
 }
 
-void SLAM::matchLines(const Mat_<imtype> & im, vector<Match> & matches,
-		      float threshold) const {
+void SLAM::matchLines(const Mat_<imtype> & im, const CameraState & state,
+		      vector<Match> & matches, float threshold) const {
   int stride = 2;
   vector<float> subsamples;
   subsamples.push_back(1);
@@ -288,7 +288,7 @@ void SLAM::matchLines(const Mat_<imtype> & im, vector<Match> & matches,
     //const Point2i pos = trackLine(imsubsamples, subsample, i,
     //				  threshold, P, NULL);
     float response;
-    const Point2i pos = lineFeatures[i].track(impyramid, P, threshold, stride,
+    const Point2i pos = lineFeatures[i].track(impyramid, state, threshold, stride,
 					      response, pdisp);
     if (response > threshold)
       matches.push_back(Match(pos, i));
@@ -303,20 +303,4 @@ void SLAM::matchLines(const Mat_<imtype> & im, vector<Match> & matches,
     merge(channels, 3, imdisp);
   }
 
-}
-
-matf SLAM::getLocalCoordinates(const matf & p2d) const {
-  matf R = kalman.getRot().toMat();
-  matf Minv = (K * R).inv(); //TODO: once and for all
-  matf p (3,1); p(0) = p2d(0); p(1) = p2d(1); p(2) = 1.0f;
-  matf out(3,3);
-  matf a = out.col(0);
-  a = Minv * p;
-  a /= norm(a);
-  //int k = (abs(a(0))<min(abs(a(1)),abs(a(0))))?0:((abs(a(1))<abs(a(2)))?1:2);
-  //matf v (3, 1, 0.0f); v(k) = 1.0f;
-  matf v = R.col(0);
-  a.cross(v).copyTo(out.col(1));
-  a.cross(out.col(1)).copyTo(out.col(2));
-  return out;
 }

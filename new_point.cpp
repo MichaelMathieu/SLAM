@@ -3,9 +3,9 @@
 using namespace cv;
 using namespace std;
 
-matf SLAM::getCovariancePointAlone(const matf & pt2d,
+matf SLAM::getCovariancePointAlone(const CameraState & state, const matf & pt2d,
 				   float Lambda, float lambda) const {
-  matf eigv = getLocalCoordinates(pt2d);
+  matf eigv = state.getLocalCoordinatesPoint(pt2d);
   //cout << eigv << endl;
   matf eig(3,3,0.0f);
   eig(0,0) = Lambda;
@@ -126,7 +126,8 @@ void SLAM::getSortedKeyPoints(const matb & im, size_t nMinPts,
     fastThreshold = out[nMinPts*1.9].response;
 }
 
-void SLAM::computeNewLines(const matb & im, const vector<Match> & matches,
+void SLAM::computeNewLines(const matb & im, const CameraState & state,
+			   const vector<Match> & matches,
 			   int n, float minDist, int rx, int ry) {
   vector<KeyPoint> keypoints;
   getSortedKeyPoints(im, 10*minTrackedPerImage, keypoints);
@@ -143,23 +144,11 @@ void SLAM::computeNewLines(const matb & im, const vector<Match> & matches,
     if ((pt.y-ry < 0) || (pt.x-rx < 0) || (pt.y+ry >= im.size().height) ||
 	(pt.x+rx >= im.size().width))
       goto badAddNewFeature;
-    addNewLine(im, pt, rx, ry);
+    lineFeatures.push_back(LineFeature(im, state, pt, rx, ry));
     newpoints.push_back(i);
     --n;
   badAddNewFeature:;
   }
-}
-
-void SLAM::addNewLine(const Mat_<imtype> & im, const Point2f & pt2d,
-		      int rx, int ry) {
-  cout << "Adding new line" << endl;
-  matf x(3,1);
-  x(0) = pt2d.x; x(1) = pt2d.y; x(2) = 1.0f;
-  const Mat_<imtype> desc = \
-    im(Range(max(0.f, pt2d.y-ry), min((float)im.size().height, pt2d.y+ry)),
-       Range(max(0.f, pt2d.x-rx), min((float)im.size().width , pt2d.x+rx)));
-  lineFeatures.push_back(LineFeature(x, *this, desc.clone(), 5));
-  //TODO: P is computed once again
 }
 
 void SLAM::lineToFeature(const Mat_<imtype> & im, const CameraState & state,

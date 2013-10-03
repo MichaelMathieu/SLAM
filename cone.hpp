@@ -48,7 +48,11 @@ public:
 };
 
 BaseCone::BaseCone(const matf & localBase, const matf & pos)
-  :base(localBase), t(pos) {
+  :base(3,3), t(pos) {
+  //TODO: change the coordinate system of cones
+  localBase.col(2).copyTo(base.col(0));
+  localBase.col(0).copyTo(base.col(1));
+  localBase.col(1).copyTo(base.col(2));
 }
 
 FCone::FCone(const matf & localBase, const matf & pos, float sigma, float f)

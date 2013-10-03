@@ -54,9 +54,15 @@ inline float cvval(matf a) {
   return a(0);
 }
 
-template<typename T>
+/*template<typename T>
 inline T round(T a) {
   return floor(a+0.5);
+  }*/
+
+template<typename T>
+inline int iround(T a) {
+  //return (int)floor(a+0.5);
+  return (int)round(a);
 }
 
 inline void cvCopyToCrop(const cv::Mat & src, const cv::Mat & dst,

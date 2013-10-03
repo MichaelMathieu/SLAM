@@ -3,9 +3,9 @@ using namespace std;
 using namespace cv;
 
 SLAM::Feature::Feature(const Mat_<imtype> & im, const CameraState & state,
-		       int iKalman, const Point2i & pt2d, const matf & p3d,
-		       int dx, int dy)
-  :iKalman(iKalman), descriptor(2*dy, 2*dx), B(4,3) {
+		       int iKalman, const Point2f & pt2d, const matf & p3d,
+		       int rx, int ry)
+  :iKalman(iKalman), descriptor(2*ry+1, 2*rx+1), B(4,3) {
   newDescriptor(im, state, pt2d, p3d);
 }
 
@@ -17,17 +17,17 @@ SLAM::Feature::Feature(const CameraState & state, const Mat_<imtype> & descr,
 
 void SLAM::Feature::computeParams(const CameraState & state, const matf & p3d) {
   const matf & P = state.P;
-  const matf & Rinv = state.Rinv;
+  const matf localCoord = state.getLocalCoordinates();
   matf M = P(Range(0,3),Range(0,3));
   matf c = P(Range(0,3),Range(3,4));
-  matf Mu = M*Rinv.col(0);
-  matf Mv = M*Rinv.col(1);
+  matf Mu = M*localCoord.col(0);
+  matf Mv = M*localCoord.col(1);
   matf Mp = M*p3d;
   float cp3 = c(2) + Mp(2);
   float alpha = ((Mu(0) - Mu(2)) * cp3 - Mu(2)*(c(0)+Mp(0))) / (cp3*cp3);
   float beta  = ((Mv(1) - Mv(2)) * cp3 - Mv(2)*(c(1)+Mp(1))) / (cp3*cp3);
-  B(Range(0,3),Range(0,1)) = Rinv.col(0) / alpha;
-  B(Range(0,3),Range(1,2)) = Rinv.col(1) / beta;
+  B(Range(0,3),Range(0,1)) = localCoord.col(0) / alpha;
+  B(Range(0,3),Range(1,2)) = localCoord.col(1) / beta;
   //p3d.copyTo(B(Range(0,3),Range(2,3)));
   B(3,0) = B(3,1) = 0.0f;
   B(3,2) = 1.0f;
@@ -35,11 +35,13 @@ void SLAM::Feature::computeParams(const CameraState & state, const matf & p3d) {
 
 void SLAM::Feature::newDescriptor(const cv::Mat_<imtype> & im,
 				  const CameraState & state,
-				  const Point2i & pt2d, const matf & p3d) {
+				  const Point2f & pt2d, const matf & p3d) {
   int h = im.size().height, w = im.size().width;
-  int dx = descriptor.size().width/2, dy = descriptor.size().height/2;
-  Mat_<imtype> newdescr = im(Range(max(0, pt2d.y-dy), min(h, pt2d.y+dy)),
-			     Range(max(0, pt2d.x-dx), min(w, pt2d.x+dx)));
+  int rx = descriptor.size().width/2, ry = descriptor.size().height/2;
+  Mat_<imtype> newdescr = im(Range(max(0, iround(pt2d.y-ry)),
+				   min(h, iround(pt2d.y+ry+1))),
+			     Range(max(0, iround(pt2d.x-rx)),
+				   min(w, iround(pt2d.x+rx+1))));
   newdescr.copyTo(descriptor);
   computeParams(state, p3d);
 }

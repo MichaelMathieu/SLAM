@@ -2,8 +2,8 @@ CXX=g++
 LIBS=`pkg-config --libs opencv`
 #FLAGS=-W -fpic -O3 -funroll-loops -fopenmp
 FLAGS=-W -fpic -g
-SRCS=kalman.cpp mongoose.cpp visualize.cpp matching.cpp new_point.cpp cone.cpp lineFeature.cpp feature.cpp quaternion.cpp random.cpp
-MAIN=slam.cpp
+SRCS=kalman.cpp mongoose.cpp visualize.cpp matching.cpp new_point.cpp cone.cpp lineFeature.cpp feature.cpp quaternion.cpp random.cpp slam.cpp new_image.cpp
+MAIN=main.cpp
 SRCSTEST=tests.cpp test_matching.cpp test_project.cpp
 OBJS=$(SRCS:.cpp=.o)
 MAINOBJ=$(MAIN:.cpp=.o)
