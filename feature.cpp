@@ -35,15 +35,19 @@ void SLAM::Feature::computeParams(const CameraState & state, const matf & p3d) {
 
 void SLAM::Feature::newDescriptor(const cv::Mat_<imtype> & im,
 				  const CameraState & state,
-				  const Point2f & pt2d, const matf & p3d) {
+				  const Point2f & pt2d, const matf & p3d,
+				  bool ignoreIfOnBorder) {
   int h = im.size().height, w = im.size().width;
   int rx = descriptor.size().width/2, ry = descriptor.size().height/2;
   Mat_<imtype> newdescr = im(Range(max(0, iround(pt2d.y-ry)),
 				   min(h, iround(pt2d.y+ry+1))),
 			     Range(max(0, iround(pt2d.x-rx)),
 				   min(w, iround(pt2d.x+rx+1))));
-  newdescr.copyTo(descriptor);
-  computeParams(state, p3d);
+  if (!ignoreIfOnBorder || ((newdescr.size().width == descriptor.size().width) &&
+			    (newdescr.size().height == descriptor.size().height))) {
+    newdescr.copyTo(descriptor);
+    computeParams(state, p3d);
+  }
 }
 
 Mat_<SLAM::imtype> SLAM::Feature::project(const CameraState & state, const matf & p3d,
@@ -77,7 +81,8 @@ Mat_<SLAM::imtype> SLAM::Feature::project(const CameraState & state, const matf 
   location.y = ymin;
   location.width = max(0,xmax-xmin);
   location.height = max(0,ymax-ymin);
-  if ((location.width == 0) || (location.height == 0))
+  if ((location.width == 0) || (location.height == 0)
+      || (location.width > 500) || (location.height > 500)) // TODO
     return Mat_<imtype>(0,0);
   
   Mat_<imtype> proj(location.height, location.width, 0.0f);
@@ -103,6 +108,12 @@ Point2i SLAM::Feature::track(const ImagePyramid<imtype> & pyramid,
   Mat_<imtype> proj_mask;
   Mat_<imtype> proj = project(state, p3d, proj_mask, proj_location);
   int projw = proj.size().width, projh = proj.size().height;
+
+  if ((projw <= 0) || (projh <= 0)) {
+    response = -1;
+    return Point2i(-1,-1);
+  }
+
   matf p2d = state.project(p3d);
 
   float fullResSearchRad = 20; //TODO
@@ -127,8 +138,9 @@ Point2i SLAM::Feature::track(const ImagePyramid<imtype> & pyramid,
 	searchRad *= stride;
     }
     if (disp)
-      circle(disp[0], trackedPoint, searchRad * ((iSub == 0) ? 1 : stride),
-	     Scalar(0.5 + 0.5*iSub/nSubs), 2);
+      for (int idisp = 0 ; idisp < 3; ++idisp)
+	circle(disp[idisp], trackedPoint, searchRad * ((iSub == 0) ? 1 : stride),
+	       Scalar(0.5 + 0.5*iSub/nSubs), 2);
     Rect areaRect(round(trackedPoint.x/sub - searchRad),
 		  round(trackedPoint.y/sub - searchRad),
 		  round(2*searchRad+1), round(2*searchRad+1));
@@ -140,10 +152,22 @@ Point2i SLAM::Feature::track(const ImagePyramid<imtype> & pyramid,
       return Point2i(trackedPoint.x, trackedPoint.y);
   }
   
-  if (disp && (response > threshold))
-    cvCopyToCrop(proj, disp[1], Rect(trackedPoint.x-floor(0.5*proj.size().width),
-				     trackedPoint.y-floor(0.5*proj.size().height),
-				     proj.size().width, proj.size().height));
+  if (disp) {
+    Rect dstrect(trackedPoint.x-floor(0.5*proj.size().width),
+		 trackedPoint.y-floor(0.5*proj.size().height),
+		 proj.size().width, proj.size().height);
+    Rect dstrectC(max(dstrect.x, 0), max(dstrect.y, 0), 0, 0);
+    dstrectC.width  = min(dstrect.width , disp[0].size().width  - dstrectC.x);
+    dstrectC.height = min(dstrect.height, disp[0].size().height - dstrectC.y);
+    disp[0](dstrectC) *= 0.5;
+    if (response > threshold) {
+      disp[2](dstrectC) *= 0.5;
+      cvConvertToCrop(proj, disp[1], dstrect, CV_32F, 1.f/255.f);
+    } else {
+      disp[1](dstrectC) *= 0.5;
+      cvConvertToCrop(proj, disp[2], dstrect, CV_32F, 1.f/255.f);
+    }
+  }
 
   return Point2i(trackedPoint.x, trackedPoint.y);
 }

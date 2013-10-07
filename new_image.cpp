@@ -67,16 +67,19 @@ void SLAM::newImage(const mat3b & imRGB) {
     matchLines(im, statePosterior, lineMatches, 0.9f);
     for (size_t i = 0; i < lineMatches.size(); ++i) {
       Point2f pt = lineMatches[i].pos;
-      line(imdisp, pt, pt, Scalar(255,255,255), 20);
+      circle(imdisp, pt, 2, Scalar(255, 255, 0));
       matf pt2d(2,1); pt2d(0) = pt.x; pt2d(1) = pt.y;
       lineFeatures[lineMatches[i].iFeature].newView(statePosterior, pt2d);
-      lineFeatures[lineMatches[i].iFeature].cone.display(imdisp, kalman.getP());
+      //lineFeatures[lineMatches[i].iFeature].cone.display(imdisp, kalman.getP());
     }
 
+    // remove lines unseen for too long
+    removeOldLines();
+
     // add new features
-    computeNewLines(im, statePosterior, pointMatches,
-		    //minTrackedPerImage-pointMatches.size()-lineMatches.size(),
-		    3-lineFeatures.size(), 100.f, 40, 40);
+    addNewLines(im, statePosterior, pointMatches, lineMatches,
+		//minTrackedPerImage-pointMatches.size()-lineMatches.size(),
+		3-lineFeatures.size(), 100.f, 40, 40);
     
     // convert good lines to points
     {

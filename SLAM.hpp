@@ -57,7 +57,8 @@ private:
     cv::Mat_<imtype> project(const CameraState & state, const matf & p3d,
 			     cv::Mat_<imtype> & mask, cv::Rect & location) const;
     void newDescriptor(const cv::Mat_<imtype> & im, const CameraState & state,
-		       const cv::Point2f & pt2d, const matf & p3d);
+		       const cv::Point2f & pt2d, const matf & p3d,
+		       bool ignoreIfOnBorder = false);
     cv::Point2i track(const ImagePyramid<imtype> & pyramid,
 		      const CameraState & state, const matf & p3d,
 		      float threshold, int stride, float & response,
@@ -67,6 +68,7 @@ private:
   struct LineFeature {
     cv::Mat_<imtype> descriptor;
     BinCone cone;
+    mutable int timeSinceLastSeen; //TODO: not elegant
     //TODO: harmonize LineFeature constructor with Feature
     LineFeature(const cv::Mat_<imtype> & im, const CameraState & state,
 		const cv::Point2f & pt2d, int rx, int ry);
@@ -95,18 +97,21 @@ public:
 					int stride, float & response,
 					bool useExackAreaMask = false);
 private:
-  void computeNewLines(const matb & im, const CameraState & state,
-		       const std::vector<Match> & matches,
-		       int n, float minDist, int rx = 15, int ry = 15);
   void lineToFeature(const cv::Mat_<imtype> & im, const CameraState & state,
 		     const cv::Point2i & pt2d, int iLineFeature);
   matf getCovariancePointAlone(const CameraState & state, const matf & pt2d,
 			       float Lambda, float lambda) const;
-  void projectGaussian(const matf & mu, const matf & sigma, matf & output) const;
+  void projectGaussian(const CameraState & state, const matf & mu,
+		       const matf & sigma, matf & output) const;
   void matchPoints(const cv::Mat_<imtype> & im, const CameraState & state,
 		   std::vector<Match> & matches, float threshold = .95f);
   void matchLines(const cv::Mat_<imtype> & im, const CameraState & state,
 		  std::vector<Match> & matches, float threshold = 0.95f) const;
+  void addNewLines(const matb & im, const CameraState & state,
+		   const std::vector<Match> & matches,
+		   const std::vector<Match> & lineMatches,
+		   int n, float minDist, int rx = 15, int ry = 15);
+  void removeOldLines();
 public:
   inline SLAM(const matf & K, const matf & distCoeffs, const matf & mongooseAlign,
 	      int minTrackedPerImage = 10);
@@ -159,7 +164,7 @@ matf SLAM::CameraState::getLocalCoordinates() const {
 bool SLAM::LineFeature::isLocalized() const {
   float proba;
   cone.getMaxP(&proba);
-  return proba > 0.75;
+  return proba > 0.9; //TODO: hard coded
 }
 
 template<typename T>

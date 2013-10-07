@@ -78,6 +78,21 @@ inline void cvCopyToCrop(const cv::Mat & src, const cv::Mat & dst,
 		  cv::Range(dstArea.x+dleft, dstArea.x+dstArea.width -dright)));
 }
 
+inline void cvConvertToCrop(const cv::Mat & src, const cv::Mat & dst,
+			    const cv::Rect & dstArea, int rtype,
+			    double alpha = 1., double beta = 0.) {
+  const int dtop    = std::max(-dstArea.y, 0);
+  const int dleft   = std::max(-dstArea.x, 0);
+  const int dright  = std::max(dstArea.x+dstArea.width -dst.size().width , 0);
+  const int dbottom = std::max(dstArea.y+dstArea.height-dst.size().height, 0);
+  if ((dtop+dbottom < src.size().height) && (dleft+dright < src.size().width))
+    src(cv::Range(dtop, src.size().height-dbottom),
+	cv::Range(dleft, src.size().width-dright))
+      .convertTo(dst(cv::Range(dstArea.y+dtop , dstArea.y+dstArea.height-dbottom),
+		     cv::Range(dstArea.x+dleft, dstArea.x+dstArea.width -dright)),
+		 rtype, alpha, beta);
+}
+
 inline void imshowscale(const std::string & str, const cv::Mat & im) {
   double m, M;
   cv::minMaxLoc(im, &m, &M);

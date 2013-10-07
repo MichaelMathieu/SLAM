@@ -28,11 +28,11 @@ inline float projectGaussianAux(int i, int j, matf & x, matf & Mx,
   return exp(0.5*(beta*beta/alpha-gamma))*sqrt(alpha)/den;
 }
   
-void SLAM::projectGaussian(const matf & mu, const matf & sigma, matf & output) const {
+void SLAM::projectGaussian(const CameraState & state, const matf & mu,
+			   const matf & sigma, matf & output) const {
   matf x(3,1,1.0f), Mx;
-  //TODO: M should be uptodate, same above
-  matf M = K * kalman.getRot().toMat();
-  matf Minv = M.inv(); //TODO: once and for all
+  const matf & M = state.KR;
+  const matf & Minv = state.KRinv;
   matf C = kalman.getPos();
   float den = 2.*3.1415926*sqrt(determinant(sigma)); //TODO:det once
   matf muC = mu - C;
@@ -126,9 +126,10 @@ void SLAM::getSortedKeyPoints(const matb & im, size_t nMinPts,
     fastThreshold = out[nMinPts*1.9].response;
 }
 
-void SLAM::computeNewLines(const matb & im, const CameraState & state,
-			   const vector<Match> & matches,
-			   int n, float minDist, int rx, int ry) {
+void SLAM::addNewLines(const matb & im, const CameraState & state,
+		       const vector<Match> & matches,
+		       const vector<Match> & lineMatches,
+		       int n, float minDist, int rx, int ry) {
   vector<KeyPoint> keypoints;
   getSortedKeyPoints(im, 10*minTrackedPerImage, keypoints);
   //TODO that could have linear complexity (with a bit more memory)
@@ -137,6 +138,9 @@ void SLAM::computeNewLines(const matb & im, const CameraState & state,
     const Point2f & pt = keypoints[i].pt;
     for (size_t j = 0; j < matches.size(); ++j)
       if (norm(matches[j].pos - pt) < minDist)
+	goto badAddNewFeature;
+    for (size_t j = 0; j < lineMatches.size(); ++j)
+      if (norm(lineMatches[j].pos - pt) < minDist)
 	goto badAddNewFeature;
     for (size_t j = 0; j < newpoints.size(); ++j)
       if (norm(keypoints[newpoints[j]].pt - pt) < minDist)
@@ -149,6 +153,13 @@ void SLAM::computeNewLines(const matb & im, const CameraState & state,
     --n;
   badAddNewFeature:;
   }
+}
+
+void SLAM::removeOldLines() {
+  const int lineDropTime = 5; //TODO
+  for (int i = lineFeatures.size()-1; i >= 0; --i)
+    if (lineFeatures[i].timeSinceLastSeen > lineDropTime)
+      lineFeatures.erase(lineFeatures.begin() + i);
 }
 
 void SLAM::lineToFeature(const Mat_<imtype> & im, const CameraState & state,

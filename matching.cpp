@@ -229,9 +229,16 @@ Point2i SLAM::matchFeatureInArea(const Mat_<imtype> & im,
 
 void SLAM::matchPoints(const Mat_<imtype> & im, const CameraState & state,
 		       std::vector<Match> & matches, float threshold) {
-  matf disp[2] = {matf(im.size().height, im.size().width, 0.0f),
-		  matf(im.size().height, im.size().width, 128.f)};
-
+  matf* pdisp = NULL;
+  matf disp[3];
+  if (imdisp_debug.size().height != 0) {
+    Mat imdisp = imdisp_debug;
+    Mat channels[3];
+    split(imdisp, channels);
+    for (int i = 0; i < 3; ++i)
+      channels[i].convertTo(disp[i], CV_32F, 1.f/255.f);
+    pdisp = disp;
+  }
 
   int stride = 3;
   vector<float> subsamples;
@@ -246,19 +253,17 @@ void SLAM::matchPoints(const Mat_<imtype> & im, const CameraState & state,
 					  threshold, stride, response, disp);
     if (response > threshold) {
       matches.push_back(Match(pos, i));
-      if (response < 0.5f+0.5f*threshold)
-	features[i].newDescriptor(im, state, pos,
-				  kalman.getPt3d(features[i].iKalman));
+      //if (response > 0.5f+0.5f*threshold)
+      //features[i].newDescriptor(im, state, pos,
+      //			  kalman.getPt3d(features[i].iKalman), true);
     }
   }
 
   if (imdisp_debug.size().height != 0) {
     Mat imdisp = imdisp_debug;
-    int fromto[] = {0,0};
     Mat channels[3];
-    split(imdisp, channels);
-    disp[0].convertTo(channels[0], CV_8U, 255.);
-    disp[1].convertTo(channels[1], CV_8U);
+    for (int i = 0; i < 3; ++i)
+      disp[i].convertTo(channels[i], CV_8U, 255.);
     merge(channels, 3, imdisp);
   }
 }
@@ -272,17 +277,18 @@ void SLAM::matchLines(const Mat_<imtype> & im, const CameraState & state,
   ImagePyramid<imtype> impyramid(im, subsamples); // TODO: computed twice
   matf P = kalman.getP(); //TODO multiple times, careful about up to date
 
+
   matf* pdisp = NULL;
-  matf disp[2];
+  matf disp[3];
   if (imdisp_debug.size().height != 0) {
     Mat imdisp = imdisp_debug;
     Mat channels[3];
     split(imdisp, channels);
-    channels[0].convertTo(disp[0], CV_32F, 1./255.);
-    channels[1].convertTo(disp[1], CV_32F, 1./255.);
+    for (int i = 0; i < 3; ++i)
+      channels[i].convertTo(disp[i], CV_32F, 1.f/255.f);
     pdisp = disp;
   }
-
+  
   for (size_t i = 0; i < lineFeatures.size(); ++i) {
     //TODO: radius
     //const Point2i pos = trackLine(imsubsamples, subsample, i,
@@ -297,10 +303,8 @@ void SLAM::matchLines(const Mat_<imtype> & im, const CameraState & state,
   if (imdisp_debug.size().height != 0) {
     Mat imdisp = imdisp_debug;
     Mat channels[3];
-    split(imdisp, channels);
-    disp[0].convertTo(channels[0], CV_8U, 255.);
-    disp[1].convertTo(channels[1], CV_8U, 255.);
+    for (int i = 0; i < 3; ++i)
+      disp[i].convertTo(channels[i], CV_8U, 255.);
     merge(channels, 3, imdisp);
   }
-
 }

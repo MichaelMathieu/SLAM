@@ -9,7 +9,8 @@ SLAM::LineFeature::LineFeature(const Mat_<imtype> & im, const CameraState & stat
 		 Range(max(0, iround(pt2d.x-rx)),
 		       min(im.size().width, iround(pt2d.x+rx+1)))).clone()),
    cone(state.getLocalCoordinatesPoint(pt2d), state.t, 3.f, state.f, 5,
-	100, 20, 3) /*TODO: cone parameters*/ {
+	100, 20, 3) /*TODO: cone parameters*/,
+   timeSinceLastSeen(1) {
 }
 
 void SLAM::LineFeature::newView(const CameraState & state, const matf & pt2d) {
@@ -21,8 +22,9 @@ void SLAM::LineFeature::newView(const CameraState & state, const matf & pt2d) {
 Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
 				 const CameraState & state, float threshold,
 				 int stride, float & response, Mat* disp) const {
+  ++timeSinceLastSeen;
   int nSubs = pyramid.nSubs();
-  float maxWidth = 100, maxHeight = 100;
+  float maxWidth = 300, maxHeight = 300;//TODO
 
   // compute tracking area (at lowest resolution)
   float areaRes = 1.f / pyramid.subsamples[nSubs-1];
@@ -97,12 +99,12 @@ Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
   //cvWaitKey(0);
   //exit(0);
 
+  /*
   if (disp) {
     matf imdisp = disp[0];
-    cvCopyToCrop(matf(areaRect.height/areaRes, areaRect.width/areaRes, 0.25f),
-		 imdisp,
-		 Rect(areaRect.x/areaRes, areaRect.y/areaRes,
-		      areaRect.width/areaRes, areaRect.height/areaRes));
+    cvCopyToCrop(matf(areaRect.height/areaRes, areaRect.width/areaRes, 0.5f),
+		 imdisp, Rect(areaRect.x/areaRes, areaRect.y/areaRes,
+			      areaRect.width/areaRes, areaRect.height/areaRes));
     for (int i = 0; i < areaRect.width; ++i)
       for (int j = 0; j < areaRect.height; ++j) {
 	if (areaMask(j,i)) {
@@ -113,6 +115,7 @@ Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
 	}
       }
   }
+  */
 
   // multi resolution tracking
   Mat_<imtype> totrack;
@@ -127,15 +130,16 @@ Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
   trackedPoint *= 1./areaRes;
   
   if (disp) {
-    matf imdisp = disp[1];
     int dh = descriptor.size().height, dw = descriptor.size().width;
-    imdisp *= 255;
-    cvCopyToCrop(descriptor, imdisp, Rect(trackedPoint.x-dw/2, trackedPoint.y-dh/2, dw, dh));
-    imdisp /= 255.;
+    Rect dstrect(trackedPoint.x-dw/2, trackedPoint.y-dh/2, dw, dh);
+    Rect dstrectC(max(dstrect.x, 0), max(dstrect.y, 0), 0, 0);
+    dstrectC.width  = min(dstrect.width , disp[0].size().width  - dstrectC.x);
+    dstrectC.height = min(dstrect.height, disp[0].size().height - dstrectC.y);
+    disp[1](dstrectC) *= 0.5;
+    disp[2](dstrectC) *= 0.5;
+    cvConvertToCrop(descriptor, disp[0], dstrect, CV_32F, 1.f/255.f);
   }
-  //return trackedPoint;
 
-  //TODO: reactivate (and i think the first step is at res 1)
   // 2) refine tracking
   if (response > threshold * 0.67) {
     for (int iSub = nSubs-2; iSub >= 0; --iSub) {
@@ -155,5 +159,8 @@ Point2i SLAM::LineFeature::track(const ImagePyramid<imtype> & pyramid,
 	break;
     }
   }
+
+  if (response > threshold)
+    timeSinceLastSeen = 1;
   return trackedPoint;
 }		 
